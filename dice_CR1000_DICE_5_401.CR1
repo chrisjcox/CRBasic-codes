@@ -1,0 +1,259 @@
+Public PgmVersion As String = "DICE5_401"
+' De-Icing Comparison Experiment (D-ICE)
+'
+' CR1000 Logger #5
+'
+' Program author: C. Cox christopher.j.cox@noaa.gov
+'
+' 5/22/2017  
+'
+' Updates:
+'    5/22-31  : development
+'    6/1/2017 : sent to logger for calibration to ESRL roof
+'               Eppley lines tested vs. 1.005 mV, 50K (case), 100K (dome
+'                 pir_28507_V    : 1.001635
+'                 pir_28507_CaseR: 49951/49978
+'                 pir_28507_DomeR: 99913.02
+'                 pir_28507_V    : 1.001635/1.00197/1.00129/1.00264
+'                 pir_28507_CaseR: 49951/49978
+'                 pir_28507_DomeR: 99913.02
+'    6/2/2017 : visual checks, emailed to Jim for upload to loggers mounted on ESRL roof   
+'    6/5/2017 : add station name & program version
+'    7/5/2017 : added SR30 & EKO fan status, changed cm_11* to cm21*, 1 min Averages from FP2 to IEEE4
+'                version 101 = Calibration, June 2017
+'                version 201 = Deployment, August 2017
+'   8/13/2017 : add avg_count: this is the number of scans completed for the 1 min DataTable record 
+'   8/15/2017 : add icing probe, StdDev
+'   8/16/2017 : debugged ice probe data stream
+'   8/18/2017 : final checks, debugging
+'               * version 301 = DICE Campaign, beg. 8/18/2017 *
+'   8/25/2017 : more checks, debugging back on Boulder
+'                - SR30_fanstatus was actualy IR20_fantstatus...made this change
+'               * version 401 = DICE Campaign, beg. 8/xx/2017 *
+'
+'   This program runs Eppley PIRs, MeteoSwiss K&Z CM11, stock SPN1, some fantachs, and ice probe
+' ---------------------------------------------------------------------
+'     Manuf.     Model   SN      Owner       Ch        Note
+' ---------------------------------------------------------------------  
+'     Delta-T    SPN1    A1571   Delta-T     SE1/2     Stock, 9600,none,8,1
+'     K&Z        CM21    970426  MeteoSwiss  D7/SE15   V(D7)+1x3wPT100
+'     Eppley     PIR     28507   Eppley      D1/SE3/4  V(D1)+2xTherm
+'     Eppley     PIR     34309   PSD         D3/SE7/8  V(D3+2xTherm
+'     Anasphere  SLWC    ID 29   PSD         COM4
+'
+'                       * Fantachs *
+'     EKO        MS80M   S16090016           P1
+'     EKO        MS80    S1608802            P2
+'     Hukseflux  IR20    4037                D5        This one is odd... not freq., but needs to be large and negative (~ -900)
+' ---------------------------------------------------------------------
+
+
+' =====================================================================
+' Declare Public Variables
+
+' Logger ...
+Public PTemp, batt_volt, avg_count
+
+' Delta-T SPN1
+Public RawString As String * 30, Split1(2) As String * 16, Split2(3) As String * 16, NBytesReturned As String * 16 
+Public spn1_gmd_a1571_tot_Wm2
+Public spn1_gmd_a1571_dif_Wm2
+
+' MeteoSwiss Kipp & Zonen
+Public cm21_970426_mV
+Public cm21_970426_DegC
+Public cm21_970426_BrHalf3W_RsRo
+
+' Eppley PIR 28507
+Public pir_28507_mV
+Public pir_28507_CaseDegC
+Public pir_28507_DomeDegC
+Public pir_28507_CaseR
+Public pir_28507_DomeR
+
+' Eppley PIR 34309
+Public pir_34309_mV
+Public pir_34309_CaseDegC
+Public pir_34309_DomeDegC
+Public pir_34309_CaseR
+Public pir_34309_DomeR
+
+' EKO fan tachs
+Public ms80m_S16090016_fantach
+Public ms80_S16088025_fantach
+
+' Hukseflux VU01 fan
+Public ir20_4037_fanstatus
+
+' Ice Probe
+Public ice_probe_raw As String * 30
+Public ice_probe_raw_split(2) As String * 10
+Public ice_probe_DegC
+Public ice_probe_Freq_Hz
+Public ice_probe_id
+Public ice_probe_daisychain
+Public dummy
+Public tmp
+
+
+' =====================================================================
+
+
+' =====================================================================
+' Define Data Tables.
+DataTable (CR1000_DICE_5,1,-1)	
+  DataInterval (0,60,Sec,10)
+	
+  ' Logger ...
+	Average (1,PTemp,IEEE4,False)
+  Average (1,batt_volt,IEEE4,False)
+  ' This is just a counter growing an array of ones that will  =
+  ' # of scans per minute (when data table is initiated) 
+  Totalize (1,avg_count,FP2,False)
+  
+  ' Delta-T SPN1
+  Average (1,spn1_gmd_a1571_tot_Wm2,IEEE4,False)
+  StdDev  (1,spn1_gmd_a1571_tot_Wm2,IEEE4,False)
+  Average (1,spn1_gmd_a1571_dif_Wm2,IEEE4,False)
+  StdDev  (1,spn1_gmd_a1571_dif_Wm2,IEEE4,False)
+  
+  ' MeteoSwiss Kipp & Zonen
+  Average (1,cm21_970426_mV,IEEE4,False)
+	StdDev  (1,cm21_970426_mV,IEEE4,False)
+  Average (1,cm21_970426_DegC,IEEE4,False)	
+  StdDev  (1,cm21_970426_DegC,IEEE4,False)
+  Average (1,cm21_970426_BrHalf3W_RsRo,IEEE4,False)
+  StdDev  (1,cm21_970426_BrHalf3W_RsRo,IEEE4,False)
+    
+  ' Eppley PIR 28507
+  Average (1,pir_28507_mV,IEEE4,False)
+  StdDev  (1,pir_28507_mV,IEEE4,False)
+  Average (1,pir_28507_CaseDegC,IEEE4,False)
+  StdDev  (1,pir_28507_CaseDegC,IEEE4,False)
+  Average (1,pir_28507_DomeDegC,IEEE4,False)
+  StdDev  (1,pir_28507_DomeDegC,IEEE4,False)
+  Average (1,pir_28507_CaseR,IEEE4,False)
+  StdDev  (1,pir_28507_CaseR,IEEE4,False)
+  Average (1,pir_28507_DomeR,IEEE4,False)
+  StdDev  (1,pir_28507_DomeR,IEEE4,False)
+  
+  ' Eppley PIR 34309
+  Average (1,pir_34309_mV,IEEE4,False)
+  StdDev  (1,pir_34309_mV,IEEE4,False)
+  Average (1,pir_34309_CaseDegC,IEEE4,False)
+  StdDev  (1,pir_34309_CaseDegC,IEEE4,False)
+  Average (1,pir_34309_DomeDegC,IEEE4,False)
+  StdDev  (1,pir_34309_DomeDegC,IEEE4,False)
+  Average (1,pir_34309_CaseR,IEEE4,False)
+  StdDev  (1,pir_34309_CaseR,IEEE4,False)
+  Average (1,pir_34309_DomeR,IEEE4,False)
+  StdDev  (1,pir_34309_DomeR,IEEE4,False)
+  
+  ' EKO fan tachs
+  Average (1,ms80m_S16090016_fantach,IEEE4,False)
+  Average (1,ms80_S16088025_fantach,IEEE4,False)
+  
+  ' SR30 2060 fan status
+  Average (1,ir20_4037_fanstatus,IEEE4,False)  
+  
+  ' Ice Probe
+  Sample  (1,ice_probe_id,UINT2) 
+  Average (1,ice_probe_DegC,IEEE4,False) 
+  StdDev  (1,ice_probe_DegC,IEEE4,False) 
+  Average (1,ice_probe_Freq_Hz,IEEE4,False) 
+  StdDev  (1,ice_probe_Freq_Hz,IEEE4,False) 
+            
+EndTable
+' =====================================================================
+
+
+' =====================================================================
+'Main Program
+BeginProg
+  SerialOpen (ComME,9600,0,0,50)
+  SerialOpen (Com4,9600,16,0,50)
+
+	Scan (1,Sec,0,0)
+	  
+	  ' Logger ...
+		PanelTemp (PTemp,250)
+		Battery (batt_volt)
+		' This is used to count the # of 1s scans that are included in the
+	  ' 1m average: should be 60, but less if lags cause scan > 1s
+	  avg_count = PTemp*0+1
+		
+    ' MeteoSwiss Kipp & Zonen CM11 970426 
+    ' thermopile 
+    VoltDiff (cm21_970426_mV,1,AutoRange,7,True ,0,_60Hz,1.0,0)
+    ' 3-wire configuration PT100, Rf is 0.01% 10KOhm
+    BrHalf3W (cm21_970426_BrHalf3W_RsRo,1,mV25,15 ,Vx2,1,2200,True ,0,_60Hz,100.93,0)
+    PRT      (cm21_970426_DegC,1,cm21_970426_BrHalf3W_RsRo,1,0)
+    
+    ' Eppley PIR 28507
+    ' thermopile
+    VoltDiff (pir_28507_mV,1,AutoRange,1,True ,0,_60Hz,1.0,0)   
+    ' CASE: AC half bridge followed by BR transform: Rf is 0.01% 50KOhm  
+    BrHalf (pir_28507_CaseR,1,mV250,4,Vx1,1,250,True ,0,_60Hz,1,0)
+    pir_28507_CaseR        = 50000 * (pir_28507_CaseR / (1 - pir_28507_CaseR))
+    pir_28507_CaseDegC     = 1/(0.0010295 + 0.0002391 * LN(pir_28507_CaseR) + 0.0000001568 * LN(pir_28507_CaseR)^3) - 273.15
+    ' DOME: AC half bridge followed by BR transform: Rf is 0.01% 50KOhm      
+    BrHalf (pir_28507_DomeR,1,mV250,3,Vx1,1,250,True ,0,_60Hz,1,0)
+    pir_28507_DomeR        = 50000 * (pir_28507_DomeR / (1 - pir_28507_DomeR))
+    pir_28507_DomeDegC     = 1/(0.0010295 + 0.0002391 * LN(pir_28507_DomeR) + 0.0000001568 * LN(pir_28507_DomeR)^3) - 273.15
+    
+    ' Eppley PIR 34309
+    VoltDiff (pir_34309_mV,1,AutoRange,3,True ,0,_60Hz,1.0,0)
+    ' CASE: AC half bridge followed by BR transform: Rf is 0.01% 50KOhm 
+    BrHalf (pir_34309_CaseR,1,mV250,8,Vx3,1,250,True ,0,_60Hz,1,0)
+    pir_34309_CaseR        = 50000 * (pir_34309_CaseR / (1 - pir_34309_CaseR))
+    pir_34309_CaseDegC     = 1/(0.0010295 + 0.0002391 * LN(pir_34309_CaseR) + 0.0000001568 * LN(pir_34309_CaseR)^3) - 273.15
+    ' DOME: AC half bridge followed by BR transform: Rf is 0.01% 50KOhm     
+    BrHalf (pir_34309_DomeR,1,mV250,7,Vx3,1,250,True ,0,_60Hz,1,0)
+    pir_34309_DomeR        = 50000 * (pir_34309_DomeR / (1 - pir_34309_DomeR))
+    pir_34309_DomeDegC     = 1/(0.0010295 + 0.0002391 * LN(pir_34309_DomeR) + 0.0000001568 * LN(pir_34309_DomeR)^3) - 273.15    
+
+    ' Delta-T
+    ' RS is the poll for spn1
+    SerialOutBlock (ComME,"RS",2)
+    SerialInRecord (ComME,RawString,0,0,0,NBytesReturned,01)
+    SplitStr (Split1(),RawString,"S",2,5) ' remove the "S", which is always the first character
+    SplitStr (Split2(),Split1(2),",",3,5) ' split the string by commas, saving only total and diffuse (ignoring sunshibne presence)
+    spn1_gmd_a1571_tot_Wm2     = Split2(1) ' [W m^2]
+    spn1_gmd_a1571_dif_Wm2     = Split2(2) ' [W m^2]
+    
+    ' EKO fan tachs
+    PulseCount (ms80_S16088025_fantach,1,1,0,1,1.0,0)
+    PulseCount (ms80m_S16090016_fantach,1,2,0,1,1.0,0)
+  
+    ' SR30 2060 fan status
+    VoltDiff (ir20_4037_fanstatus,1,mV5000,5,True ,0,_60Hz,1.0,0)
+  
+    ' Ice Probe
+    ' 1) First, read the current line of output 
+    SemaphoreGet (1)
+    SerialInRecord (Com4,ice_probe_raw,0,18,0,dummy,01)
+    SemaphoreRelease (1)
+    ' 2) Now split the string into ID, daisy #, data
+    SplitStr (ice_probe_raw_split,ice_probe_raw,"=",2,5)
+    dummy = Mid (ice_probe_raw_split(2),1,2)
+    If dummy <> NAN
+      ice_probe_id = dummy
+    EndIf
+    dummy = Mid (ice_probe_raw_split(2),3,2) 
+    If dummy <> NAN
+      ice_probe_daisychain = dummy
+    EndIf
+    tmp = HexToDec ( Mid (ice_probe_raw_split(2),5,6) )
+    ' 3) Determine whether data is T or F based on range, then assign accordingly
+    If tmp < 350 AND tmp > 173
+      ice_probe_DegC = tmp - 273.15
+    ElseIf tmp > 1000
+      ice_probe_Freq_Hz = tmp / 100 * 2
+    EndIf
+  
+  CallTable CR1000_DICE_5
+	NextScan
+
+EndProg
+
+' =====================================================================

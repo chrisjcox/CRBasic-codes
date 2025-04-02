@@ -1,0 +1,171 @@
+Public PgmVersion As String = "DICE4_401"
+' De-Icing Comparison Experiment (D-ICE)
+'
+' CR1000 Logger #4
+'
+' Program author: C. Cox christopher.j.cox@noaa.gov
+'
+' 5/22/2017  
+'
+' Updates:
+'    5/22-31  : development
+'    6/1/2017 : sent to logger for calibration to ESRL roof
+'    6/2/2017 : visual checks, emailed to Jim for upload to loggers mounted on ESRL roof
+'    6/5/2017 : variable name error fix, add station name & program version
+'    7/5/2017 : 1 min Averages FP2 to IEEE4, added *BrHalf3W_RsRo record to SR25 and IR20 
+'                version 101 = Calibration, June 2017
+'                version 201 = Deployment, August 2017
+'   8/13/2017 : add fantach for psp 28507
+'               add avg_count: this is the number of scans completed for the 1 min DataTable record
+'   8/15/2017 : add StdDev
+'   8/18/2017 : final checks, debugging
+'               * version 301 = DICE Campaign, beg. 8/18/2017 *
+'   8/25/2017 : more checks, debugging back on Boulder
+'                - fantach for spp 38172 was actually for other eigenbrodt, cm11 130617
+'                - psp_28507_fantach to pir_28507_fantach
+'               * version 401 = DICE Campaign, beg. 8/xx/2017 *
+' 
+'   This program runs Delta-T (GMD), Hukseflux SR25, analog EKO, and some fantachs
+' ---------------------------------------------------------------------
+'     Manuf.   Model   SN         Owner     Ch      Note
+' ---------------------------------------------------------------------  
+'     Delta-T  SPN1    A1338      GMD       SE9/10  PMOD ven
+'     Huk      SR25    2510       Huk       D2/SE5  V(D2)+1x3wPT100(D5)
+'     Huk      IR20    4037       Huk       D1/SE7  V(D1)+1x3wPT100(D7)
+'     EKO      MS802F  F16305R    EKO       D7
+'     EKO      MS80    S16088025  EKO       D8
+'
+'                     * Fantachs *
+'    Eppley    CM11   130617                P1
+'    Eppley    PIR    28507                 P2
+' ---------------------------------------------------------------------
+
+
+' =====================================================================
+' Declare Public Variables
+
+' Logger ...
+Public PTemp, batt_volt, avg_count
+
+' Delta-T SPN1
+Public RawString As String * 30, Split1(2) As String * 16, Split2(3) As String * 16, NBytesReturned As String * 16 
+Public spn1_dt_a1338_tot_Wm2
+Public spn1_dt_a1338_dif_Wm2
+
+' Hukseflux SR25
+Public sr25_2510_DegC
+Public sr25_2510_BrHalf3W_RsRo
+Public sr25_2510_mV
+
+' Hukseflux IR20
+Public ir20_4037_DegC
+Public ir20_4037_BrHalf3W_RsRo
+Public ir20_4037_mV
+
+' EKO MS802F
+Public ms802f_F16305R_mV
+
+' EKO MS80
+Public ms80_S16088025_mV
+
+' SPP (PSD Eigenbrodt) fan status
+Public cm11_130617_fantach 
+' Eppley VEN fantchs
+Public pir_28507_fantach
+' =====================================================================
+
+
+' =====================================================================
+' Define Data Tables.
+DataTable (CR1000_DICE_4,1,-1)	
+  DataInterval (0,60,Sec,10)
+	
+  ' Logger ...
+	Average  (1,PTemp,IEEE4,False)
+  Average  (1,batt_volt,IEEE4,False)	
+  Totalize (1,avg_count,FP2,False)
+
+  ' Delta-T SPN1 a1338
+  Average (1,spn1_dt_a1338_tot_Wm2,IEEE4,False)
+  StdDev  (1,spn1_dt_a1338_tot_Wm2,IEEE4,False)
+  Average (1,spn1_dt_a1338_dif_Wm2,IEEE4,False)
+  StdDev  (1,spn1_dt_a1338_dif_Wm2,IEEE4,False)
+      	
+  ' Huskeflux SR25 2510
+  Average (1,sr25_2510_mV,IEEE4,False)
+  StdDev  (1,sr25_2510_mV,IEEE4,False)
+  Average (1,sr25_2510_BrHalf3W_RsRo,IEEE4,False)
+  StdDev  (1,sr25_2510_BrHalf3W_RsRo,IEEE4,False)
+  Average (1,sr25_2510_DegC,IEEE4,False)
+  StdDev  (1,sr25_2510_DegC,IEEE4,False)
+  
+  ' Hukseflux IR20 4037    
+  Average (1,ir20_4037_mV,IEEE4,False)
+  StdDev  (1,ir20_4037_mV,IEEE4,False)
+  Average (1,ir20_4037_BrHalf3W_RsRo,IEEE4,False)
+  StdDev  (1,ir20_4037_BrHalf3W_RsRo,IEEE4,False)
+  Average (1,ir20_4037_DegC,IEEE4,False) 
+  StdDev  (1,ir20_4037_DegC,IEEE4,False) 
+  
+  ' EKO MS802F F16305R
+  Average (1,ms802f_F16305R_mV,IEEE4,False)  
+  StdDev  (1,ms802f_F16305R_mV,IEEE4,False)  
+  
+  ' EKO MS80 S16088025
+  Average (1,ms80_S16088025_mV,IEEE4,False)
+  StdDev  (1,ms80_S16088025_mV,IEEE4,False)
+  
+  ' SPP 38172 fan status
+  Average (1,cm11_130617_fantach,IEEE4,False)
+  ' PSP 28507 fantch
+  Average (1,pir_28507_fantach,IEEE4,False)  
+
+EndTable
+' =====================================================================
+
+
+' =====================================================================
+'Main Program
+BeginProg
+  SerialOpen (ComME,9600,0,0,50)
+	Scan (1,Sec,0,0)
+	  
+	  ' Logger ...
+		PanelTemp (PTemp,250)
+		Battery (batt_volt)
+		avg_count = PTemp*0+1
+    
+    ' Hukseflux SR25
+    VoltDiff (sr25_2510_mV,1,mV25,2,True ,0,_60Hz,1.0,0)
+    BrHalf3W (sr25_2510_BrHalf3W_RsRo,1,mV25,5,Vx1,1,2200,True ,0,_60Hz,100.93,0)
+    PRT      (sr25_2510_DegC,1,sr25_2510_BrHalf3W_RsRo,1.0,0)
+    
+    ' Hukseflux IR20
+    VoltDiff (ir20_4037_mV,1,AutoRange,1,True ,0,_60Hz,1.0,0)
+    BrHalf3W (ir20_4037_BrHalf3W_RsRo,1,mV25,7,Vx1,1,2200,True ,0,_60Hz,100.93,0)
+    PRT      (ir20_4037_DegC,1,ir20_4037_BrHalf3W_RsRo,1.0,0)
+    
+    ' EKO MS802F F16305R
+    VoltDiff (ms802f_F16305R_mV,1,AutoRange,7,True ,0,_60Hz,1.0,0)
+    
+    ' EKO MS80 S16088025 
+    VoltDiff (ms80_S16088025_mV,1,AutoRange,8,True ,0,_60Hz,1.0,0)
+    
+    ' Delta-T
+    ' RS is the poll for spn1
+    SerialOutBlock (ComME,"RS",2)
+    SerialInRecord (ComME,RawString,0,0,0,NBytesReturned,01)
+    SplitStr (Split1(),RawString,"S",2,5) ' remove the "S", which is always the first character
+    SplitStr (Split2(),Split1(2),",",3,5) ' split the string by commas, saving only total and diffuse (ignoring sunshibne presence)
+    spn1_dt_a1338_tot_Wm2 = Split2(1) ' [Wm^2]
+    spn1_dt_a1338_dif_Wm2 = Split2(2) ' [Wm^2]
+       
+    ' SPP 38172 & PSP 28507 fan status
+    PulseCount (cm11_130617_fantach,1,1,0,1,1.0,0)
+    PulseCount (pir_28507_fantach,1,2,0,1,1.0,0)
+
+  CallTable CR1000_DICE_4
+	NextScan
+
+EndProg
+' =====================================================================

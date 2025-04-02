@@ -1,0 +1,312 @@
+Public PgmVersion As String = "DICE6_401"
+' De-Icing Comparison Experiment (D-ICE)
+'
+' CR1000 Logger #6
+'
+' Program author: C. Cox christopher.j.cox@noaa.gov
+'
+' 5/22/2017  
+'
+' Updates:
+'    5/22-31  : development
+'    6/1/2017 : sent to logger for calibration to ESRL roof
+'    6/2/2017 : visual checks, emailed to Jim for upload to loggers mounted on ESRL roof
+'    6/5/2017 : fix temp calc, add station name & program version
+'    7/4/2017 : add SR30 as MODBUS on address #1
+'    7/4/2017 : fan tachs for CVF4s added
+'    7/5/2017 : "cmp11*" to "cm11*", 1 min Averages FP2 to IEEE4, added DR02-T1 (Hukseflux direct)
+'                version 101 = Calibration, June 2017
+'                version 201 = Deployment, August 2017
+'   8/13/2017 : add fantach for psp 34231 & 34309
+'               add avg_count: this is the number of scans completed for the 1 min DataTable record
+'   8/15/2017 : add StdDev
+'   8/18/2017 : final checks, debugging
+'               removed DR02 (could not be installed)
+'               * version 301 = DICE Campaign, beg. 8/18/2017 *
+'   8/25/2017 : more checks, debugging back on Boulder
+'                - added SR30 fantach and heat amperage
+'                - changed pir_34231_fantach to psp_34231_fantach 
+'               * version 401 = DICE Campaign, beg. 8/xx/2017 *
+'
+'   This program runs Eppley PIRs, MeteoSwiss K&Z CM11/CMP22 & 4x RS485 MODBUS
+' ---------------------------------------------------------------------
+'     Manuf.     Model   SN         Owner      Ch        Note
+' ---------------------------------------------------------------------  
+'     K&Z        CM11    130814     K&Z        SE1
+'     K&Z        CM11    130819     K&Z        SE5    
+'     K&Z        CM11    130818     K&Z        SE6
+'     K&Z        CMP22   160478     K&Z        D2/SE5      V(D2)+1xtherm
+'     K&Z        CGR4    160183     K&Z        D4/SE6      V(D4)+1xtherm
+'     Hukseflux  SR30    2060       Hukseflux  MODBUS #1   19200,even,1,8 
+'     K&Z        SGR4    160008     K&Z        MODBUS #2   19200,even,1,8
+'     K&Z        SMP22   160002     K&Z        MODBUS #3   19200,even,1,8
+'     EKO        MS80M   S16090016  EKO        MODBUS #4   19200,even,1,8
+'    
+'                           * Fantachs * 
+'     Eppley     PSP     34231                 P1 
+'     Eppley     PIR     34309                 P2 
+'     K&Z        CGR4    160008                C11   
+'     K&Z        SMP22   160002                C12                
+'     K&Z        CGR4    160183                C13
+'     K&Z        CMP22   160478                C14
+'     Hukseflux  SR30    2060                  MODBUS #1
+ 
+' ---------------------------------------------------------------------
+
+
+' =====================================================================
+' Declare Public Variables
+
+' Logger ...
+Public PTemp, batt_volt, avg_count
+
+' Kipp and Zonen
+Public cm11_130814_mV
+Public cm11_130819_mV
+Public cm11_130617_mV
+Public cmp22_160478_mV
+Public cmp22_160478_CaseR
+Public cmp22_160478_DegC
+Public cmp22_160478_fantach
+Public cgr4_160183_mV
+Public cgr4_160183_CaseR
+Public cgr4_160183_DegC
+Public cgr4_160183_fantach
+
+' MS80M
+Public ms80m_S16090016_data(6) As Long
+Public ms80m_S16090016_val
+Public ms80m_S16090016_mV As Float
+Public ms80m_S16090016_mV_Long As Long
+Public ms80m_S16090016_DegC As Float 
+Public ms80m_S16090016_DegC_Long As Long
+Public ms80m_S16090016_Irr As Float
+Public ms80m_S16090016_Irr_Long As Long 
+
+' SGR4
+Public sgr4_160008_data(17) As Long
+Public sgr4_160008_val
+Public sgr4_160008_status
+Public sgr4_160008_tcomp_rad
+Public sgr4_160008_raw_sensor_data
+Public sgr4_160008_body_DegC
+Public sgr4_160008_ext_power_sensor
+Public sgr4_160008_tcomp_lwd
+Public sgr4_160008_lwd
+Public sgr4_160008_fantach
+
+' SMP22
+Public smp22_160002_data(17) As Long
+Public smp22_160002_val
+Public smp22_160002_status
+Public smp22_160002_tcomp_rad
+Public smp22_160002_raw_sensor_data
+Public smp22_160002_body_DegC
+Public smp22_160002_ext_power_sensor
+Public smp22_160002_fantach
+
+' SR30 2060
+Public sr30_2060_data(5) As Long
+Public sr30_2060_DegC 
+Public sr30_2060_IrrC
+Public sr30_2060_Irr
+Public sr30_2060_val
+
+' PSP 34231, 34309, SR30 2060 fantachs + SR30 heat amperage
+Public psp_34231_fantach
+Public pir_34309_fantach
+Public sr30_2060_fantach
+Public sr30_2060_heatA
+
+' =====================================================================
+
+
+' =====================================================================
+' Define Data Tables.
+DataTable (CR1000_DICE_6,1,-1)	
+  DataInterval (0,60,Sec,10)
+	
+   ' Logger ...
+	 Average (1,PTemp,IEEE4,False)
+   Average (1,batt_volt,IEEE4,False)
+   ' This is used to count the # of 1s scans that are included in the
+	 ' 1m average: should be 60, but less if lags cause scan > 1s
+   Totalize (1,avg_count,FP2,False)	
+
+   ' MS80M
+   Average (1,ms80m_S16090016_mV,IEEE4,False)	
+   StdDev  (1,ms80m_S16090016_mV,IEEE4,False)	
+   Average (1,ms80m_S16090016_DegC,IEEE4,False)	
+   StdDev  (1,ms80m_S16090016_DegC,IEEE4,False)	
+   Average (1,ms80m_S16090016_Irr,IEEE4,False)	
+   StdDev  (1,ms80m_S16090016_Irr,IEEE4,False)  
+
+   ' Kipp and Zonen
+   Average (1,cm11_130814_mV,IEEE4,False)
+   StdDev  (1,cm11_130814_mV,IEEE4,False)	
+   Average (1,cm11_130819_mV,IEEE4,False)
+   StdDev  (1,cm11_130819_mV,IEEE4,False)	
+   Average (1,cm11_130617_mV,IEEE4,False)	
+   StdDev  (1,cm11_130617_mV,IEEE4,False)	
+   Average (1,cmp22_160478_mV,IEEE4,False)
+   StdDev  (1,cmp22_160478_mV,IEEE4,False)
+   Average (1,cmp22_160478_CaseR,IEEE4,False)
+   StdDev  (1,cmp22_160478_CaseR,IEEE4,False)
+   Average (1,cmp22_160478_DegC,IEEE4,False)
+   StdDev  (1,cmp22_160478_DegC,IEEE4,False)
+   Average (1,cgr4_160183_mV,IEEE4,False)
+   StdDev  (1,cgr4_160183_mV,IEEE4,False)
+   Average (1,cgr4_160183_DegC,IEEE4,False)
+   StdDev  (1,cgr4_160183_DegC,IEEE4,False)
+   Average (1,cgr4_160183_CaseR,IEEE4,False)
+   StdDev  (1,cgr4_160183_CaseR,IEEE4,False)
+    
+  ' SGR4 160008
+   Average (1,sgr4_160008_tcomp_rad,IEEE4,False) 
+   StdDev  (1,sgr4_160008_tcomp_rad,IEEE4,False) 
+   Average (1,sgr4_160008_raw_sensor_data,IEEE4,False) 
+   StdDev  (1,sgr4_160008_raw_sensor_data,IEEE4,False)   
+   Average (1,sgr4_160008_body_DegC,IEEE4,False)  
+   StdDev  (1,sgr4_160008_body_DegC,IEEE4,False)
+   Average (1,sgr4_160008_ext_power_sensor,IEEE4,False)  
+   Average (1,sgr4_160008_tcomp_lwd,IEEE4,False)
+   StdDev  (1,sgr4_160008_tcomp_lwd,IEEE4,False)      
+   Average (1,sgr4_160008_lwd,IEEE4,False)  
+   StdDev  (1,sgr4_160008_lwd,IEEE4,False) 
+   
+  ' SMP22 160002
+   Average (1,smp22_160002_tcomp_rad,IEEE4,False) 
+   StdDev  (1,smp22_160002_tcomp_rad,IEEE4,False)  
+   Average (1,smp22_160002_raw_sensor_data,IEEE4,False)  
+   StdDev  (1,smp22_160002_raw_sensor_data,IEEE4,False)   
+   Average (1,smp22_160002_body_DegC,IEEE4,False) 
+   StdDev  (1,smp22_160002_body_DegC,IEEE4,False)  
+   Average (1,smp22_160002_ext_power_sensor,IEEE4,False) 
+   
+  ' SR30 2060
+   Average (1,sr30_2060_DegC,IEEE4,False) 
+   StdDev  (1,sr30_2060_DegC,IEEE4,False)   
+   Average (1,sr30_2060_Irr,IEEE4,False) 
+   StdDev  (1,sr30_2060_Irr,IEEE4,False)
+   Average (1,sr30_2060_IrrC,IEEE4,False)
+   StdDev  (1,sr30_2060_IrrC,IEEE4,False)  
+      
+   ' Fantachs
+   Average (1,cgr4_160183_fantach,IEEE4,False)
+   Average (1,smp22_160002_fantach,IEEE4,False)
+   Average (1,sgr4_160008_fantach,IEEE4,False)
+   Average (1,cmp22_160478_fantach,IEEE4,False)
+   Average (1,psp_34231_fantach,IEEE4,False)
+   Average (1,pir_34309_fantach,IEEE4,False)   
+   Average (1,sr30_2060_fantach,IEEE4,False)
+   Average (1,sr30_2060_heatA,IEEE4,False)
+            
+EndTable
+' =====================================================================
+
+
+' =====================================================================
+'Main Program
+' The MODBUS polls are slow, about 0.12s per. The limit for the total
+' is 1s (the scan sequence). Total takes 0.71s.
+BeginProg
+  SerialOpen (ComME,19200,2,0,50)
+  
+	Scan (1,Sec,0,0)
+
+	  ' Logger ...
+		PanelTemp (PTemp,250)
+		Battery (batt_volt)
+    ' This is just a counter growing an array of ones that will  =
+    ' # of scans per minute (when data table is initiated) 
+		avg_count = PTemp*0+1
+		
+    ' Kipp and Zonen
+    ' CM11 130814
+    VoltDiff (cm11_130814_mV,1,AutoRange,1,True ,0,_60Hz,1.0,0)
+    ' CM11 130819 
+    VoltDiff (cm11_130819_mV,1,AutoRange,5,True ,0,_60Hz,1.0,0)
+    ' CM11 130818 
+    VoltDiff (cm11_130617_mV,1,AutoRange,6,True ,0,_60Hz,1.0,0)
+    ' CM22 160478
+    VoltDiff (cmp22_160478_mV,1,AutoRange,2,True ,0,_60Hz,1.0,0)
+    BrHalf (cmp22_160478_CaseR,1,mV250,5,Vx1,1,250,True ,0,_60Hz,1,0)
+    cmp22_160478_CaseR     = 50000 * (cmp22_160478_CaseR / (1 - cmp22_160478_CaseR))
+    cmp22_160478_DegC      = 1/(0.0010295 + 0.0002391 * LN(cmp22_160478_CaseR) + 0.0000001568 * LN(cmp22_160478_CaseR)^3)-273.15   
+    ' CGR4 160183
+    VoltDiff (cgr4_160183_mV,1,AutoRange,4,True ,0,_60Hz,1.0,0)
+    BrHalf (cgr4_160183_CaseR,1,mV250,6,Vx1,1,250,True ,0,_60Hz,1,0)
+    cgr4_160183_CaseR      = 50000 * (cgr4_160183_CaseR / (1 - cgr4_160183_CaseR))
+    cgr4_160183_DegC       = 1/(0.0010295 + 0.0002391 * LN(cgr4_160183_CaseR) + 0.0000001568 * LN(cgr4_160183_CaseR)^3)-273.15
+  
+    ' MS80M S16090016
+    ' 0.12s
+    SemaphoreGet (1)
+    ModbusMaster (ms80m_S16090016_val,ComME,19200,4,3,ms80m_S16090016_data,20,6,3,100,3)
+    ms80m_S16090016_Irr_Long  = ms80m_S16090016_data(4)*2^16+ms80m_S16090016_data(3)
+    MoveBytes (ms80m_S16090016_Irr,0,ms80m_S16090016_Irr_Long,0,4)
+    ms80m_S16090016_mV_Long   = ms80m_S16090016_data(2)*2^16+ms80m_S16090016_data(1)
+    MoveBytes (ms80m_S16090016_mV,0,ms80m_S16090016_mV_Long,0,4)    
+    ms80m_S16090016_DegC_Long = ms80m_S16090016_data(6)*2^16+ms80m_S16090016_data(5)
+    MoveBytes (ms80m_S16090016_DegC,0,ms80m_S16090016_DegC_Long,0,4)
+    SemaphoreRelease (1)
+
+    ' SMP22 160002 
+    ' 0.12s
+    SemaphoreGet (1)
+    ModbusMaster (smp22_160002_val,ComME,19200,3,4,smp22_160002_data,1,17,3,100)
+    smp22_160002_status           = smp22_160002_data(4)
+    smp22_160002_tcomp_rad        = smp22_160002_data(6)
+    smp22_160002_raw_sensor_data  = smp22_160002_data(7)
+    smp22_160002_body_DegC        = smp22_160002_data(9)/10.0
+    smp22_160002_ext_power_sensor = smp22_160002_data(10)
+    SemaphoreRelease (1)    
+    
+    ' SGR4 160008 
+    ' 0.12s 
+    SemaphoreGet (1)
+    ModbusMaster (sgr4_160008_val,ComME,19200,2,4,sgr4_160008_data,1,17,3,100)
+    sgr4_160008_status           = sgr4_160008_data(4)
+    sgr4_160008_tcomp_rad        = sgr4_160008_data(6)
+    sgr4_160008_raw_sensor_data  = sgr4_160008_data(7)
+    sgr4_160008_body_DegC        = sgr4_160008_data(9)/10.0
+    sgr4_160008_ext_power_sensor = sgr4_160008_data(10)
+    sgr4_160008_tcomp_lwd        = sgr4_160008_data(11)
+    sgr4_160008_lwd              = sgr4_160008_data(12)
+    SemaphoreRelease (1)
+   
+    ' SR30 2060
+    ' I can't access "Factory Only" Registers, which means I can't span
+    ' them in the ModbusMaster call, thus 3 calls are needed to get 
+    ' everything... 
+    ' 0.32s for all 3, 0.12s for the 1st, 0.1s each for 2nd and 3rd
+    SemaphoreGet (1)
+    ModbusMaster (sr30_2060_val,ComME,19200,1,3,sr30_2060_data,3,5,3,100,3)
+    sr30_2060_DegC = sr30_2060_data(5) / 100
+    sr30_2060_IrrC = ( sr30_2060_data(1)*2^16 + sr30_2060_data(2) ) / 100
+    sr30_2060_Irr  = ( sr30_2060_data(3)*2^16 + sr30_2060_data(4) ) / 100
+    SemaphoreRelease (1)   
+    SemaphoreGet (1)
+    ModbusMaster (sr30_2060_val,ComME,19200,1,3,sr30_2060_data,197,1,3,100,3)
+    sr30_2060_fantach = sr30_2060_data(1) / 60 'Hz
+    SemaphoreRelease (1)
+    SemaphoreGet (1) 
+    ModbusMaster (sr30_2060_val,ComME,19200,1,3,sr30_2060_data,199,1,3,100,3)
+    sr30_2060_heatA   = sr30_2060_data(1) 'mA
+    SemaphoreRelease (1) 
+ 
+    ' PSP 34231 & 34309 fantach
+    PulseCount (psp_34231_fantach,1,1,0,1,1.0,0)
+    PulseCount (pir_34309_fantach,1,2,0,1,1.0,0)
+    PulseCount (sgr4_160008_fantach,1,11,0,1,1.0,0)
+    PulseCount (smp22_160002_fantach,1,12,0,1,1.0,0)
+    PulseCount (cgr4_160183_fantach,1,13,0,1,1.0,0)
+    PulseCount (cmp22_160478_fantach,1,14,0,1,1.0,0)    
+  
+  CallTable CR1000_DICE_6
+	NextScan
+
+EndProg
+
+' =====================================================================	
+
