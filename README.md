@@ -6,7 +6,7 @@ The objective was to assess the current state of ice-mitigation technology for o
 was led by the National Oceanic and Atmospheric Administration (NOAA) and conducted as a community effort through the Cold Climates Issues Working Group 
 of the Baseline Surface Radiation Network, which operates under the auspices of the World Meteorological Organization. Partners were from the international
 community, incuding industry, government and academic institutions. The references section provides citations to data and project outcomes. This repository
-archives CRBasic codes used to log the data from a series of four Campbell Scientific CR1000 data loggers (denoted #s 5, 6, 7, and 8).
+archives CRBasic codes used to log the data from a series of four Campbell Scientific CR1000 data loggers (denoted #s 4, 5, 6, and 7).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
