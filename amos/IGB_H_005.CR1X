@@ -1,0 +1,854 @@
+Public PgmVersion As String = "IGB_H_005_Main v2"
+'
+' Artic Mobile Observing System (AMOS)
+' 2021 Surface Energy Budget "MET" program
+' Based on Atmospheric Surface Flux Station (ASFS), MOSAiC
+'
+' CR1000X 
+' Cal. 
+'
+' Program author:     C. Cox christopher.j.cox@noaa.gov
+'
+' Updates:
+'   beg. ASFS50_602_nolicor, 7/12/2019
+'   3/31/2020-5/11/2020, initial development thru v104 
+'   11/23/2021; v 110. set spc on time to be 1700-1730 to match certus lan. metek heater mode to auto function. tried to give IMU oritentation based on Anthony's report
+'   12/23/21: v111. trying to fix vaisala_T problem
+'   12/28/21: vn3000 default off bc antenna failures. spc on beg 1650.
+'   12/31/21: fix temp issue
+'   5/5/22: edits for sudobuoy & 004. temp back to the way it was and read signed 16.
+'   8/9/23: sdm address from 0 to 1 for 005. fixes to nav to correct 10s res to 1s as intended
+
+' -----------------------------------------------------------------------------
+'     Manuf.     Model        SN          Function    Ch             Note
+' -----------------------------------------------------------------------------
+
+'     Hukseflux  SR30         xxxxx       SWU         MODBUS #1     19200,E,1,8 
+'     Hukseflux  SR30         xxxxx       SWD         MODBUS #2     19200,E,1,8
+'     Vaisala    PTU300       xxxxx       met: t/p/q  MODBUS #3     19200,E,1,8  
+'     Hukseflux  IR20         xxxx        LWU         D2/SE5        Temp is 2-wire
+'     Hukseflux  IR20         xxxx        LWD         D1/SE8        Temp is 2-wire
+'     Metek      uSonic-3     0115018883  3d winds    ComRS232
+'     VectorNav  VN300        xxxxxxxxxx  GNSS/INS    ComC5/6       38400,N,1,8
+
+' -----------------------------------------------------------------------------
+
+'SequentialMode
+PipeLineMode
+
+' =============================================================================
+
+' Set Parameteres
+Const stname       = "AMOS21APOD1"     ' station name
+Const tableS       = "sci"             ' sciency data
+Const tableN       = "nav"             ' navigation data
+Const tableF       = "fast"            ' matek 10 Hz data
+Const tableS_freq As Long = 60         ' [sec] data file averaging time: 60 = 1 min averages
+Const scan_freq   As Long = 10         ' [sec] the scan cycle
+Const sscan_freq  As Long = 1          ' [sec] subscans for fast nav
+Const crdfile_freq As Long = 60        ' [min] duration of data contained in individual .dat files
+
+
+' SPC
+Public spc_fid
+Public spc_msg As String * 100
+Public spc_override
+Public spc_countdown
+Public spc_counter
+
+' Communication Protocols
+Const swu_addr = 1
+Const swd_addr = 2
+Const vaisala_addr = 3
+Const vn300_factorybaud = 115200
+Const vn300_port = ComC5 
+Const vn300_buffer = 350 
+Const vn300_serial_fmt = 19 ' binary N 1 8
+Const sonic_port = ComRS232
+Const sonic_baud = 57600
+Const sonic_fmt = 0 ' low N 1 8
+Const sonic_buffer = 12001
+Const modbus_port = ComC7
+Const modbus_baud = 19200
+Const modbus_fmt = 2 ' low E 1 8
+Const modbus_buffer = 100 
+Const modbus_mode = 4 ' RS485 half duplex
+
+' **************************************************************************************************************************************************************************************
+' Set Cals
+'Up facing
+Const ir20_lwd_s = 11.80/1000 ' xxxx Sensitivity [mV/(W/m2)]
+Const ir20_lwd_acoef = -16.9054e-6
+Const ir20_lwd_bcoef = 2.65018e-3
+Const ir20_lwd_ccoef = 0.9538
+
+'Down Facing
+Const ir20_lwu_s = 11.60/1000 ' xxxx Sensitivity [mV/(W/m2)] 
+Const ir20_lwu_acoef = -17.5292e-6
+Const ir20_lwu_bcoef = 2.57829e-3
+Const ir20_lwu_ccoef = 0.9554
+' **************************************************************************************************************************************************************************************
+
+
+' Some useful physical constants
+Const stefboltz = 5.67 * 10^-8  ' Stefan-Boltzmann constant
+Const K0 = 273.15               ' Conversion from Celcius to Kelvins
+Const RefR = 100000             ' Reference resistor in Ohms
+Const Pi = 3.141593             ' Pi
+
+' Set up dynamic constants. These can be switched without recompiling the program
+' We will use this to toggle power to all devices at the SDM-CD16S DCDC controller
+' The controller has 16 channels so the toggles are a 16 byte array
+' Channel 1:  VN300 GPS
+' Channel 2:  Vaisala met sensor
+' Channel 3:  SWD (upward-facing SR30 pyranometer)
+' Channel 4:  SWU (downward-facing SR30 pyranometer)
+' Channel 5:  LWD case heat (upward-facing IR20 pyrgeometer)
+' Channel 6:  LWU case heat (downward-facing IR20 pyrgeomter)
+' Channel 7:  LWD fan (upward-facing VU01 ventilator)
+' Channel 8:  LWU fan (downward-facing VU01 ventilator)
+' Channel 9:  Metek Sonic Anemometer sensor
+' Channel 10: Metek Sonic Anemometer heat
+' Channel 11: SWD SR30 heat
+' Channel 12: SWU SR30 heat
+' Channel 13: SWD SR30 fan
+' Channel 14: SWU SR30 fan
+' Channel 15: Metek Heater Mode
+' Channel 16: SPC
+
+ConstTable (pwr_panel) 
+    
+  ' 12 VDC channels (16) and Flags            1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6
+  Const light_switch_sum_default As String = "1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,0" ' MAMJJAS
+  Const light_switch_win_default As String = "1,1,0,0,1,1,0,0,1,1,0,0,0,0,1,0" ' DJF 
+  Const light_switch_override    As String = "x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x" 
+  Const light_switch_mode        As String = "A" 
+  
+  ' **************************************************************************************************************************************************************************************
+  ' VN 300 Frame of Reference
+  ' The buoy's frame of reference (FoR) will be defined as boom pointing "buoy north"
+
+  ' First, measurements in buoy FoR that moves vn300 centerpoint to position of antenna A
+  Const Meas1_x = -0.60 ' [m] vn300 position relative to antenna A along A-B (x); value is negative if vn300 is in the B direction of A
+  Const Meas1_y = 0.12 ' [m] vn300 offset perpenducular to A-B (y); value is negative if vn300 is to the right of A-B (when viewing along boom)
+  Const Meas1_z = -0.61 ' [m] vn300 offset along buoy's long axis (roughly up/down); value is negative if vn300 is closer to the water than A-B
+  '
+  ' Second, measurements is similar wit sign conventions reversed; distances of B relative to A in the buoy's FoR. 
+  Const Meas2_x = 1.55 ' [m] A should be closer to the buoy center, B farther long the boom. This value is the (positive) distance from A to B if B is farther out along the boom and A.
+  Const Meas2_y = 0 ' [m] If A and B are along the boom, this = 0
+  Const Meas2_z = 0 ' [m] If A and B are along the boom, this = 0
+  '
+  ' Third, are the yaw, pitch and roll angular offsets (in that order!) that would rotate vn300 into buoy FoR
+  Const Meas3_yaw = 0 ' [deg] positive clockwise
+  Const Meas3_pit = 0 ' [deg] positive clockwise
+  Const Meas3_rol = 0 ' [deg] postive clockwise
+  ' **************************************************************************************************************************************************************************************
+  
+
+
+
+EndConstTable 
+
+Const exp_len = 16                               ' expected length of light switch
+Public light_switch_status As String * 34        ' Ports are set according to this
+Public light_switch_var(16)                      ' Array version of light_switch_status, which is what the SDMCD16AC function operates on
+Dim light_switch_go(16)                          ' This is what is actually being changed on the SDMCD16AC
+Dim bad_msg
+Public RecordNumber As Long
+                                             
+' This is some date information. W ewill use this for progamatic control of power.
+Public rTime(9)               'declare as public and dimension rTime to 9
+Alias rTime(1) = Year         'assign the alias Year to rTime(1)
+Alias rTime(2) = Month        'assign the alias Month to rTime(2)
+Alias rTime(3) = DOM          'assign the alias DOM to rTime(3)
+Alias rTime(4) = Hour         'assign the alias Hour to rTime(4)
+Alias rTime(5) = Minute       'assign the alias Minute to rTime(5)
+Alias rTime(6) = Second       'assign the alias Second to rTime(6)
+Alias rTime(7) = uSecond      'assign the alias uSecond to rTime(7)
+Alias rTime(8) = WeekDay      'assign the alias WeekDay to rTime(8)
+Alias rTime(9) = Day_of_Year  'assign the alias Day_of_Year to rTime(9)
+
+' Declare Public Variables
+
+' Logger ...
+Public PTemp
+Public batt_volt
+Public scantime
+Units PTemp = degC
+Units batt_volt = V
+Units scantime = Sec
+
+' Navigation 
+' Vector Nav 300 
+Public NMEAStrings(3) As String * 100 = {"$GPRMC","$GPGGA","$PASHR"}
+Public vn300_data(27) As Float
+Dim GGAparse(15) As String 
+Public C(9) '3x3 rotation matrix: C00, C01, C02, C10, C11, C12, C20, C21, C22
+Public Meas3_str As String * 100
+Public hdop  
+Alias vn300_data(1) = lat_deg
+Alias vn300_data(2) = lat_min
+Alias vn300_data(3) = lon_deg
+Alias vn300_data(4) = lon_min
+Alias vn300_data(5) = sog
+Alias vn300_data(6) = cog
+Alias vn300_data(7) = mag_var
+Alias vn300_data(8) = gps_fix
+Alias vn300_data(9) = nsat
+Alias vn300_data(10) = alt
+Alias vn300_data(11) = time_pps
+Alias vn300_data(12) = time_gprmc
+Alias vn300_data(13) = gps_ready
+Alias vn300_data(14) = max_time
+Alias vn300_data(15) = n_clkch
+Alias vn300_data(16) = dummy1
+Alias vn300_data(17) = dummy2
+Alias vn300_data(18) = pashr_time
+Alias vn300_data(19) = hdg
+Alias vn300_data(20) = hdg_ref
+Alias vn300_data(21) = roll
+Alias vn300_data(22) = pitch
+Alias vn300_data(23) = heave
+Alias vn300_data(24) = roll_accuracy
+Alias vn300_data(25) = pitch_accuracy
+Alias vn300_data(26) = hdg_accuracy
+Alias vn300_data(27) = gnss_updt_qual
+
+' SR30 SWU
+Dim sr30_swu_data(5) As Long
+Public sr30_swu_DegC As Float
+Public sr30_swu_IrrC As Float
+Public sr30_swu_val As Float
+Public sr30_swu_fantach
+Public sr30_swu_heatA
+Public sr30_swu_tilt
+Public sr30_swu_val_w
+Units sr30_swu_DegC = degC
+Units sr30_swu_IrrC = Wm2
+Units sr30_swu_fantach = Hz
+Units sr30_swu_heatA = mA  
+Units sr30_swu_tilt = deg 
+
+' SR30 SWD
+Dim sr30_swd_data(5) As Long
+Public sr30_swd_DegC As Float
+Public sr30_swd_IrrC As Float
+Public sr30_swd_val As Float
+Public sr30_swd_fantach
+Public sr30_swd_heatA
+Public sr30_swd_tilt
+Public sr30_swd_val_w
+Units sr30_swd_DegC = degC
+Units sr30_swd_IrrC = Wm2
+Units sr30_swd_fantach = Hz
+Units sr30_swd_heatA = mA   
+Units sr30_swd_tilt = deg
+
+' Vaisala
+Public vaisala_data(44) As Long
+Public vaisala_val
+Public vaisala_RH_Long As Long
+Public vaisala_RH As Float
+Public vaisala_T_Long As Long  
+Public vaisala_T As Float
+Public vaisala_P_Long As Long
+Public vaisala_P As Float
+Units vaisala_RH = %
+Units vaisala_T = degC
+Units vaisala_P = hPa
+
+' Hukseflux IR20 LWU
+Public ir20_lwu_DegC
+Public ir20_lwu_Case_R
+Public ir20_lwu_mV
+Public ir20_lwu_Wm2
+Public ir20_lwu_fan
+Units ir20_lwu_DegC = degC
+Units ir20_lwu_Case_R = ohms
+Units ir20_lwu_mV = mV
+Units ir20_lwu_Wm2 = Wm2
+Units ir20_lwu_fan = mV
+
+' Hukseflux IR20 LWD
+Public ir20_lwd_DegC
+Public ir20_lwd_Case_R
+Public ir20_lwd_mV
+Public ir20_lwd_Wm2
+Public ir20_lwd_fan
+Units ir20_lwd_DegC = degC
+Units ir20_lwd_Case_R = ohms
+Units ir20_lwd_mV = mV
+Units ir20_lwd_Wm2 = Wm2
+Units ir20_lwd_fan = mV
+
+' Metek
+Public metek_422_result
+Public RawStringM As String * 15001
+Dim SplitStringsM(101) As String * 150
+Dim metekstr As String * 150
+Dim SplitStringsM2(14) As String * 25
+Public metek_heat_counter
+Dim metek_senspathstate(101)
+Public metek_mean_failed_paths
+Public metek_mean_acoustic_temp
+Dim metek_x(101)
+Dim metek_y(101)
+Dim metek_z(101)
+Dim metek_T(101)
+Dim metek_InclX(101)
+Dim metek_InclY(101)  
+Units metek_x = m/s
+Units metek_y = m/s
+Units metek_z = m/s
+Units metek_T = degC
+Units metek_InclX = deg
+Units metek_InclY = deg
+
+' These varibles will be written to the file, extracted from licor/metek above
+Public metek_senspathstate_out
+Public metek_x_out
+Public metek_y_out 
+Public metek_z_out 
+Public metek_T_out 
+Public metek_InclX_out
+Public metek_InclY_out  
+Units metek_senspathstate_out = N
+Units metek_x_out = m/s
+Units metek_y_out = m/s
+Units metek_z_out = m/s
+Units metek_T_out = degC 
+Units metek_InclX_out = deg
+Units metek_InclY_out = deg
+
+' Other; just stuff needed along the way
+Dim OutStatS As Boolean, LastFileNameS As String * 50, newfnstrS As String * 35 ' slow/science
+Dim OutStatF As Boolean, LastFileNameF As String * 50, newfnstrF As String * 35 ' fast/metek
+Dim OutStatN As Boolean, LastFileNameN As String * 50, newfnstrN As String * 35 ' nav
+Dim OutStatNflag As Boolean
+Dim OutStatFflag As Boolean
+Dim k1, k2, k3, k4, h
+
+
+' For reboots, recomplies, this is the shutdown sequence.
+' For nano pi to close out before power down
+ShutDownBegin 
+    
+    SWVX (VX3,1,0,1) ' alert SPC to upcoming shutdown
+    Delay (1,30,Sec)  ' delay 30 sec
+    
+ShutDownEnd
+
+' =============================================================================
+' Define Data Tables.
+
+' table1 is defined at the top. It is the 1 min avg "sci" science data
+DataTable (tableS,true,-1)
+  
+  DataInterval (0,tableS_freq,Sec,10)
+  
+  TableFile ("CRD:"+tableS,9,-1,0,crdfile_freq,Min,OutStatS,LastFileNameS)
+  
+   ' Logger ...
+   Sample (1,scantime,FP2)
+	 Average (1,PTemp,FP2,False)
+   Average (1,batt_volt,FP2,False)   
+   
+   ' Nav
+   Average (1,lat_deg,FP2,False)   
+   Average (1,lat_min,IEEE8,False)  
+   Average (1,lon_deg,FP2,False)           
+   Average (1,lon_min,IEEE8,False)
+   Average (1,sog,FP2,False) 
+   Average (1,cog,FP2,False) 
+   Average (1,alt,FP2,False) 
+   Average (1,hdg,IEEE4,False)   
+   Average (1,roll,IEEE4,False)   
+   Average (1,pitch,IEEE4,False)
+   Average (1,roll_accuracy,IEEE4,False)
+   Average (1,pitch_accuracy,IEEE4,False)
+   Average (1,hdg_accuracy,IEEE4,False)
+   Sample  (1,gps_fix,FP2)
+   Average (1,nsat,FP2,False)
+   Average (1,hdop,FP2,False)      
+
+   ' Vaisala
+   Average (1,vaisala_RH,FP2,False) 
+   StdDev  (1,vaisala_RH,FP2,False) 
+   Average (1,vaisala_T,FP2,False) 
+   StdDev  (1,vaisala_T,FP2,False)  
+   Average (1,vaisala_P,FP2,False) 
+   StdDev  (1,vaisala_P,FP2,False)
+   
+   ' Metek
+   Average (1,metek_x(),FP2,False)
+   StdDev  (1,metek_x(),FP2,False)
+   Average (1,metek_y(),FP2,False)
+   StdDev  (1,metek_y(),FP2,False)
+   Average (1,metek_z(),FP2,False)   
+   StdDev  (1,metek_z(),FP2,False) 
+       
+  ' SR30 SWU
+   Average (1,sr30_swu_DegC,FP2,False) 
+   StdDev  (1,sr30_swu_DegC,FP2,False)   
+   Average (1,sr30_swu_IrrC,FP2,False)
+   StdDev  (1,sr30_swu_IrrC,FP2,False)  
+   
+  ' SR30 SWD
+   Average (1,sr30_swd_DegC,FP2,False) 
+   StdDev  (1,sr30_swd_DegC,FP2,False)   
+   Average (1,sr30_swd_IrrC,FP2,False)
+   StdDev  (1,sr30_swd_IrrC,FP2,False)   
+        
+   ' Hukseflux IR20 LWU   
+   Average (1,ir20_lwu_DegC,FP2,False) 
+   StdDev  (1,ir20_lwu_DegC,FP2,False) 
+   Average (1,ir20_lwu_Wm2,FP2,False)
+   StdDev  (1,ir20_lwu_Wm2,FP2,False) 
+   Average (1,ir20_lwu_mV,FP2,False)
+   StdDev (1,ir20_lwu_mV,FP2,False)
+  
+   ' Hukseflux IR20 LWD    
+   Average (1,ir20_lwd_DegC,FP2,False) 
+   StdDev  (1,ir20_lwd_DegC,FP2,False)
+   Average (1,ir20_lwd_Wm2,FP2,False) 
+   StdDev  (1,ir20_lwd_Wm2,FP2,False)
+   Average (1,ir20_lwd_mV,FP2,False)
+   StdDev (1,ir20_lwd_mV,FP2,False)
+      
+   ' Levels ...
+   Average (1,metek_InclX(),IEEE4,False)                              
+   Average (1,metek_InclY(),IEEE4,False)
+   Average (1,sr30_swd_tilt,FP2,False) 
+        
+   ' Fantachs
+   Average (1,sr30_swu_fantach,FP2,False)
+   Average (1,sr30_swu_heatA,FP2,False)
+   Average (1,sr30_swd_fantach,FP2,False)
+   Average (1,sr30_swd_heatA,FP2,False) 
+   Average (1,ir20_lwu_fan,FP2,False) 
+   Average (1,ir20_lwd_fan,FP2,False)   
+                
+EndTable
+
+
+' tableN is defined at the top. It is the navigation data
+DataTable (tableN,true,-1)
+    
+    TableFile ("CRD:"+tableN,9,-1,0,crdfile_freq,Min,OutStatN,LastFileNameN)
+  
+         Sample (1,lat_deg,FP2)
+         Sample (1,lat_min,IEEE4)
+         Sample (1,lon_deg,FP2) 
+         Sample (1,lon_min,IEEE4) 
+         Sample (1,sog,FP2)
+         Sample (1,cog,FP2)  
+         Sample (1,alt,FP2)
+         Sample (1,hdg,FP2)
+         Sample (1,roll,FP2) 
+         Sample (1,pitch,FP2)
+                
+EndTable
+
+' table4 is defined at the top. It is the Metek output. 
+' Saved to SD-card at in crdfile_freq (nominally 1-hr) blocks
+' 36000 limits this table to 0.5 hours
+DataTable (tableF,true,36001)
+
+    TableFile ("CRD:"+tableF,9,-1,0,crdfile_freq,Min,OutStatF,LastFileNameF)
+     
+      Sample(1,metek_x_out,FP2)
+      Sample(1,metek_y_out,FP2)
+      Sample(1,metek_z_out,FP2)
+      Sample(1,metek_T_out,FP2)                                          
+      Sample(1,metek_senspathstate_out,UINT2)
+      
+EndTable
+
+' =============================================================================
+' Subs
+Sub open_ports
+  
+        ' VN300 GNSS/INS   
+        SerialOpen(vn300_port,vn300_factorybaud,vn300_serial_fmt,0,vn300_buffer)
+
+        ' Sonic Anemometer           
+        SerialOpen (sonic_port,sonic_baud,sonic_fmt,0,sonic_buffer)
+        
+        ' Modbus (SR30, Vaisala)   
+        SerialOpen (modbus_port,modbus_baud,modbus_fmt,0,modbus_buffer,modbus_mode) 
+        
+EndSub 
+
+Sub vn300_configure
+ 
+ ' Set the output rate first, else changing the baud overflows the buffer. Firmware issue?
+  SerialOut(vn300_port, "$VNWRG,07,1*XX"+CHR(13)+CHR(10), "", 0, 0)
+  ' Configure the NMEA output 
+  SerialOut(vn300_port, "$VNWRG,101,1,1,0,0,18005*XX"+CHR(13)+CHR(10), "", 0, 0) ' output NMEA (11000000000000101)
+  ' Send Meas1 config to vn300 (register 57)
+  SerialOut(vn300_port, "VNWRG,57,"+Meas1_x+","+Meas1_y+","+Meas1_z+"*XX"+CHR(13)+CHR(10), "", 0, 0)
+  ' Send Meas2 config to vn300 (register 93)
+  SerialOut(vn300_port, "VNWRG,93,"+Meas2_x+","+Meas2_y+","+Meas2_z+"*XX"+CHR(13)+CHR(10), "", 0, 0)  
+  ' Send Meas3 config to vn300 (register 26)
+  C(1) = COS(Meas3_pit)*COS(Meas3_yaw)
+  C(2) = COS(Meas3_pit)*SIN(Meas3_yaw)
+  C(3) = -1*SIN(Meas3_rol)
+  C(4) = SIN(Meas3_rol)*SIN(Meas3_pit)*COS(Meas3_yaw)-COS(Meas3_yaw)*SIN(Meas3_yaw)
+  C(5) = SIN(Meas3_rol)*SIN(Meas3_pit)*SIN(Meas3_yaw)+COS(Meas3_rol)*COS(Meas3_yaw) 
+  C(6) = SIN(Meas3_rol)*COS(Meas3_pit)
+  C(7) = COS(Meas3_rol)*SIN(Meas3_pit)*COS(Meas3_yaw)+SIN(Meas3_rol)*SIN(Meas3_yaw)
+  C(8) = COS(Meas3_rol)*SIN(Meas3_pit)*SIN(Meas3_yaw)-SIN(Meas3_rol)*COS(Meas3_yaw)
+  C(9) = COS(Meas3_rol)*COS(Meas3_pit)
+  For k1 = 1 To 9
+    Meas3_str = Meas3_str + C(k1) + ","
+  Next 
+  SerialOut(vn300_port, "VNWRG,26,"+Meas3_str+"*XX"+CHR(13)+CHR(10), "", 0, 0)
+  ' Save settings
+  SerialOut(vn300_port, "VNWNV*57"+CHR(13)+CHR(10), "", 0, 0) 
+  ' Reset so the the new nav info sticks. Manual says you need to do this, but it resets everything, even after save, even after 10s delay
+  'SerialOut(vn300_port, "$VNRST*4D"+CHR(13)+CHR(10), "", 0, 0)
+  ' Weirdest thing ever. Flashing these settings flips the terminal into RS485 mode so you have to put it back 
+   SetSetting ("ConfigComC5",0)
+   SetSetting("Baudrate(COMC5)",vn300_factorybaud)
+ 
+EndSub
+
+
+' =============================================================================
+'Main Program
+
+BeginProg
+    
+    ' Initialize some stuff
+    RecordNumber = 0
+    metek_heat_counter = 0  
+    spc_counter = 0
+    spc_override = 0
+    SWVX (VX3,0,0,1) ' set low
+ 
+    ' Main Scan. --------------------------------------------------------------
+    
+    Scan (scan_freq,Sec,0,0)
+        
+        ' What time is it?
+        RealTime(rTime)
+        'What record is this?
+        RecordNumber = RecordNumber + 1
+        ' Be and NTP Server
+        NetworkTimeProtocol ("",0,1000)    
+        
+  	    ' Logger ...
+		    PanelTemp (PTemp,50)
+		    Battery (batt_volt)   
+
+        ' ************************* Port Management *****************************
+
+        ' Just in case
+        Call open_ports     
+
+        ' This is a continuous storage of metek data in a ring buffer of size = last argument in bytes   
+        metek_422_result = SerialInBlock (sonic_port,RawStringM,sonic_buffer)
+        
+
+        ' ************************ Power Management *****************************
+        
+        ' Pick the configuration
+        ' IF it is wintertime, we will shut down the pyranometers completely
+        ' IF it is autumn, we will turn on LWD fan, cause we are gonna need it
+        ' IF other months, LW fans are off and pyranometers are on.
+        ' IF light_switch_mode is in "M"anual mode, use the override switch sequence
+        If StrComp (light_switch_mode,"A") = 0 AND spc_override = 0
+          If Month >= 10 OR Month <= 3 Then
+            light_switch_status = light_switch_win_default
+          ElseIf Month >= 4 AND Month <= 9
+            light_switch_status = light_switch_sum_default
+          EndIf
+        ElseIf StrComp (light_switch_mode,"M") = 0
+          light_switch_status = light_switch_override
+          spc_override = 0
+        EndIf 
+        
+        ' For SPC comms
+        spc_fid=FileOpen ("CRD:spc_msg.txt","r",0)
+        If spc_fid > 0 Then
+          FileRead(spc_fid,spc_msg,100)
+          FileClose (spc_fid)
+          If StrComp (spc_msg,"A") = 0 Then
+            SetSetting("pwr_panel.light_switch_mode","A")
+            SetSetting("pwr_panel.ApplyAndRestart",1)
+          Else         
+            light_switch_status = spc_msg
+            spc_override = 1
+          EndIf
+          FileManage ("CRD:spc_msg.txt",8)
+          spc_msg = ""
+        EndIf
+        
+        ' Parse the string and put it in a variable
+        SplitStr(light_switch_var(),Mid(light_switch_status,1,Len(light_switch_status)),",",16,0) ' read the string into an array        
+        
+        ' We are only using 11 channels, so 11-15 should always be off. We will use those flags in other ways.
+        ' This is really only necessary to keep extra LEDs from using power.
+        light_switch_go() = light_switch_var()
+        light_switch_go(11) = 0
+        light_switch_go(12) = 0
+        light_switch_go(13) = 0
+        light_switch_go(14) = 0
+        light_switch_go(15) = 0 
+        
+        ' If we jsut got a msg and it says turn off spc, start the coutndown to off
+        If spc_fid > 0 AND light_switch_var(16) = 0 Then 
+          spc_countdown = 1
+        EndIf                 
+        
+        ' SPC schedule
+        If Hour = 17 AND Minute < 30 Then
+          spc_override = 1
+          light_switch_go(16) = 1
+        EndIf
+        If Hour = 16 AND Minute > 50 Then
+          spc_override = 1
+          light_switch_go(16) = 1
+        EndIf
+        If Hour = 17 AND Minute = 30 AND Second < 30 Then ' Send the signal to shut down
+          spc_countdown = 1
+          spc_override = 0
+        EndIf
+               
+        ' Give SPC some time to power down
+        If spc_countdown = 1 Then
+          spc_counter = spc_counter + 1
+        EndIf
+        If spc_counter = 4 ' 40 seconds
+          SWVX (VX3,0,0,1) ' reset low
+          light_switch_go(16) = 0
+          spc_countdown = 0
+          spc_counter = 0
+        ElseIf spc_counter < 4 AND spc_countdown = 1
+          SWVX (VX3,1,0,1) ' make sure this is high
+          light_switch_go(16) = 1
+        EndIf
+        
+        ' Check: If SR30 heat is on, the fan must be on!
+        If light_switch_var(11) = 1 Then
+          light_switch_var(13) = 1
+        EndIf
+        If light_switch_var(12) = 1 Then
+          light_switch_var(14) = 1
+        EndIf    
+
+        ' Check for NANs or if too many characters were sent. This indicates an incomplete
+        ' or poorly formatted message that should be ignored.
+        bad_msg = 0
+        For h = 1 To exp_len
+          If light_switch_var(h) = NAN OR light_switch_var(h) > 1 Then
+            bad_msg = 1
+          EndIf
+        Next h
+        
+        If bad_msg > 0 Then
+          SetSetting("pwr_panel.light_switch_mode","A")
+          SetSetting("pwr_panel.ApplyAndRestart",1)
+        EndIf
+    
+        ' Metek heater management
+        '
+        ' Mean of the last 10 s scan of path state (9 paths. 0 = all good. > 0 = number of failed)
+        AvgSpa(metek_mean_failed_paths,101,metek_senspathstate)
+        ' Mean of the lat 10 s of acoustic temperature
+        AvgSpa(metek_mean_acoustic_temp,101,metek_T) 
+        ' Logic for using heater only when paths are attenuated. This is optional: engages when light_switch_var(15) = 1
+        If light_switch_var(15) = 1 Then
+          If metek_mean_failed_paths > 3 Then 
+            light_switch_go(10) = 1 ' failed paths = turn on heater
+            metek_heat_counter = metek_heat_counter + 1
+          ElseIf metek_mean_failed_paths = 0 AND metek_heat_counter > 180 Then ' leave heater on for 30 min or until de-iced
+            light_switch_go(10) = 0 ' turn heater off
+            metek_heat_counter = 0 ' reset
+          ElseIf metek_mean_failed_paths < 3 AND metek_heat_counter = 0 Then
+            light_switch_go(10) = 0 ' heater should be off
+          Else
+            metek_heat_counter = metek_heat_counter + 1
+          EndIf  
+        EndIf
+        ' If acoustic temp > 0 C, no need to use heat
+        If metek_mean_acoustic_temp > 0 Then
+          light_switch_go(10) = 0 ' heater should be off
+        EndIf
+
+        ' Apply the power config
+        SDMCD16AC(light_switch_go,1,1)
+        
+        ' Initialize VN300 after everything turns on
+        If RecordNumber = 2 Then  
+          Call vn300_configure          
+        EndIf
+        
+        ' *************************** Navigation *******************************
+
+        ' GNSS and INS data read from NMEA strings and parsed into vn300_data() array, variables aliased
+        ' 499 = 0.499s = max allowable clock drift. chosen to be <0.5x minimum scan cycle and corresponds to a reset ~ 1x per day
+        'SubScan (sscan_freq,Sec,scan_freq)
+        For k4 = 1 To 10 
+          
+          GPS (vn300_data(),-ComC5,0,499,NMEAStrings)  
+          ' Extract HDOP from GPGGA
+          SplitStr (GGAparse,NMEAStrings(2),",",15,5)
+          hdop = GGAparse(9)
+
+          CallTable tableN
+          If OutStatN Then
+             OutStatNflag = true
+          EndIf
+          Delay (1,1,Sec)
+        Next k4
+        'NextSubScan 
+
+        ' ***************************** METEK ********************************* 
+        ' Read all 100 values from the last second as they come in, stored in serial buffer
+        ' Then split the string into 100 lines, calling the data table 100 times
+        ' Allowing 101 msgs to be in the buffer to prevent strings from being cut off                
+          If Len(RawStringM) > 1 Then
+            SplitStr (SplitStringsM(),RawStringM,CHR(02),101,4) ' split message by <STX> (CHR(02)) frame
+            For k2 = 1 To 100
+              metekstr = SplitStringsM(k2)
+              SplitStr (metekstr,metekstr,CHR(03),1,5) ' remove the ETX character
+              metekstr = Mid (metekstr,10,Len(metekstr)) ' chop off the first 10 characters, which report the config settings
+              metekstr = Replace (metekstr,CHR(13),CHR(0)) ' remove CR 
+              If metekstr <> CHR(0) Then ' if the message is not empty
+                SplitStr (SplitStringsM2(),metekstr,CHR(44),12,5)' parse into 12 pieces using comma delimiter
+                metek_senspathstate(k2) = Mid (SplitStringsM2(1),2,1) 
+                metek_x(k2) = SplitStringsM2(2)
+                metek_y(k2) = SplitStringsM2(3)
+                metek_z(k2) = SplitStringsM2(4)
+                metek_T(k2) = SplitStringsM2(5)
+                metek_InclX(k2) = SplitStringsM2(10)
+                metek_InclY(k2) = SplitStringsM2(11)
+              EndIf           
+            Next k2
+          EndIf
+ 
+          ' Write to the Table
+          For k3 = 1 To 100
+              metek_x_out = metek_x(k3)
+              metek_y_out = metek_y(k3)
+              metek_z_out = metek_z(k3)
+              metek_T_out = metek_T(k3)
+              metek_InclX_out = metek_InclX(k3)
+              metek_InclY_out = metek_InclY(k3)
+              metek_senspathstate_out = metek_senspathstate(k3)
+              CallTable tableF
+              If OutStatF Then
+               OutStatFflag = true
+              EndIf
+          Next k3
+
+
+        ' ************************* ANALOG DATA *******************************
+        ' Hukseflux IR20 LWU
+        VoltDiff (ir20_lwu_mV,1,AutoRange,2,True ,0,50,1.0,0)
+        BrHalf (ir20_lwu_Case_R,1,AutoRange,6,Vx2,1,250,True ,0,50,1,0)
+        ir20_lwu_Case_R   = RefR * (ir20_lwu_Case_R / (1 - ir20_lwu_Case_R))
+        ir20_lwu_DegC     = 1/(0.0010295 + 0.0002391 * LN(ir20_lwu_Case_R) + 0.0000001568 * LN(ir20_lwu_Case_R)^3) - K0
+        ir20_lwu_Wm2        = (ir20_lwu_mV / ir20_lwu_s)*(ir20_lwu_acoef*ir20_lwu_DegC^2+ir20_lwu_bcoef*ir20_lwu_DegC+ir20_lwu_ccoef) + stefboltz * (ir20_lwu_DegC+K0)^4
+        VoltSe (ir20_lwu_fan,1,mv5000,8,True ,0,50,1.0,0)
+       
+        ' Hukseflux IR20 LWD
+        VoltDiff (ir20_lwd_mV,1,AutoRange,1,True ,0,50,1.0,0)
+        BrHalf (ir20_lwd_Case_R,1,AutoRange,5,Vx1,1,250,True ,0,50,1,0)
+        ir20_lwd_Case_R   = RefR * (ir20_lwd_Case_R / (1 - ir20_lwd_Case_R))
+        ir20_lwd_DegC     = 1/(0.0010295 + 0.0002391 * LN(ir20_lwd_Case_R) + 0.0000001568 * LN(ir20_lwd_Case_R)^3) - K0
+        ir20_lwd_Wm2        = (ir20_lwd_mV / ir20_lwd_s)*(ir20_lwd_acoef*ir20_lwd_DegC^2+ir20_lwd_bcoef*ir20_lwd_DegC+ir20_lwd_ccoef) + stefboltz * (ir20_lwd_DegC+K0)^4
+        VoltSe (ir20_lwd_fan,1,mv5000,7,True ,0,50,1.0,0)             
+
+
+        ' ***************************** MODBUS ********************************               
+        ' SR30 SWU
+        ' There are 4 modbus calls here because we do not have access to reguisters 198, 40s
+        ' We can get away with negating the wait argument, which will prevent delays if the instrument goes down
+        ModbusMaster (sr30_swu_val,modbus_port,modbus_baud,swu_addr,3,sr30_swu_data,3,5,2,15,3)
+        sr30_swu_IrrC = ( sr30_swu_data(1)*2^16 + sr30_swu_data(2) ) / 100
+        ModbusMaster (sr30_swu_val,modbus_port,modbus_baud,swu_addr,3,sr30_swu_data,7,1,2,15,1)
+        sr30_swu_DegC = sr30_swu_data(1) / 100
+        ModbusMaster (sr30_swu_val,modbus_port,modbus_baud,swu_addr,3,sr30_swu_data,195,3,1,15,3)
+        sr30_swu_tilt   = sr30_swu_data(1) / 100 
+        sr30_swu_fantach = sr30_swu_data(3) / 60 'Hz        
+        ModbusMaster (sr30_swu_val,modbus_port,modbus_baud,swu_addr,3,sr30_swu_data,199,1,1,15,3)
+        sr30_swu_heatA   = sr30_swu_data(1) 'mA   
+        
+        ' Write command and reboot if there was a change or if the whole system just turned on
+        If RecordNumber = 2 Then
+          ModbusMaster (sr30_swu_val_w,modbus_port,modbus_baud,swu_addr,5,light_switch_var(12),2,1,1,15,1) ' heat
+          ModbusMaster (sr30_swu_val_w,modbus_port,modbus_baud,swu_addr,5,light_switch_var(14),4,1,1,15,1) ' fan
+        EndIf
+             
+        ' SR30 SWD
+        ' There are 4 modbus calls here because we do not have access to reguisters 198, 40s
+        ' We can get away with negating the wait argument, which will prevent delays if the instrument goes down
+        ModbusMaster (sr30_swd_val,modbus_port,modbus_baud,swd_addr,3,sr30_swd_data,3,5,2,15,3)
+        sr30_swd_IrrC = ( sr30_swd_data(1)*2^16 + sr30_swd_data(2) ) / 100
+        ModbusMaster (sr30_swd_val,modbus_port,modbus_baud,swd_addr,3,sr30_swd_data,7,1,2,15,1)
+        sr30_swd_DegC = sr30_swd_data / 100
+        ModbusMaster (sr30_swd_val,modbus_port,modbus_baud,swd_addr,3,sr30_swd_data,195,3,1,15,3)
+        sr30_swd_tilt   = sr30_swd_data(1) / 100 
+        sr30_swd_fantach = sr30_swd_data(3) / 60 'Hz        
+        ModbusMaster (sr30_swd_val,modbus_port,modbus_baud,2,3,sr30_swd_data,199,1,1,15,3)
+        sr30_swd_heatA   = sr30_swd_data(1) 'mA
+        
+        ' Write command and reboot if there was a change or if the whole system just turned on
+        If RecordNumber = 2 Then
+          'ModbusMaster (sr30_swd_val_w,modbus_port,modbus_baud,1,16,swd_addr,1,1,1,15,1)
+           ModbusMaster (sr30_swd_val_w,modbus_port,modbus_baud,swd_addr,5,light_switch_var(11),2,1,1,15,1) ' heat
+           ModbusMaster (sr30_swd_val_w,modbus_port,modbus_baud,swd_addr,5,light_switch_var(13),4,1,1,15,1) ' fan
+        EndIf     
+        
+        ' Vaisala
+        ModbusMaster (vaisala_val,modbus_port,modbus_baud,vaisala_addr,3,vaisala_data,1,44,2,15,1)
+        vaisala_RH_Long = vaisala_data(2)*2^16 + vaisala_data(1)   
+        MoveBytes (vaisala_RH,0,vaisala_RH_Long,0,4)
+        'vaisala_T_Long = ((vaisala_data(4)-65536)*2^16) + vaisala_data(3)
+        vaisala_T_Long = vaisala_data(4)*2^16 + vaisala_data(3)
+        MoveBytes (vaisala_T,0,vaisala_T_Long,0,4)  
+        vaisala_P_Long = vaisala_data(44)*2^16 + vaisala_data(43)   
+        MoveBytes (vaisala_P,0,vaisala_P_Long,0,4)        
+          
+        
+        ' ***************************** Housekeeping *******************************
+        ' Send data to main scan tables. Note that tables 2 and 4 are called in loops above
+        CallTable tableS        
+
+        ' rename the files on the sd card to include a time stamp
+        ' creating a table to store a time is the only way I know of to 
+        ' modify a time (e.g., -crdfile_freq) and reformat into desired str
+        ' this is done 1 min after the files are written
+        
+        If OutStatS Then
+          newfnstrS = Mid(tableS.TimeStamp(6,1),1,16)
+          newfnstrS = Replace (newfnstrS,"-","")
+          newfnstrS = Replace (newfnstrS,"_","")
+          FileRename(LastFileNameS,"CRD:"&stname + "_" + tableS + "_" + newfnstrS&".dat")
+        EndIf
+        
+        If OutStatNflag Then
+          OutStatNflag = false
+          newfnstrN = Mid(tableN.TimeStamp(6,1),1,16)
+          newfnstrN = Replace (newfnstrN,"-","")
+          newfnstrN = Replace (newfnstrN,"_","")
+          FileRename(LastFileNameN,"CRD:"&stname + "_" + tableN + "_" + newfnstrN&".dat")
+        EndIf
+                
+        If OutStatFflag Then
+          OutStatFflag = false
+          newfnstrF = Mid(tableF.TimeStamp(6,1),1,16)
+          newfnstrF = Replace (newfnstrF,"-","")
+          newfnstrF = Replace (newfnstrF,"_","")
+          FileRename(LastFileNameF,"CRD:"&stname + "_" + tableF + "_" + newfnstrF&".dat")
+        EndIf
+        
+        ' How long did all that take?
+        scantime = Status.ProcessTime/1e6        
+      
+  NextScan
+  
+      
+EndProg
