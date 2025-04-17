@@ -1,4 +1,4 @@
-Public PgmVersion As String = "ASFS30_507"
+Public PgmVersion As String = "ASFS30_600"
 '
 ' Autonomous Surface Flux System (ASFS) - MOSAiC
 ' ASFS 30
@@ -43,8 +43,6 @@ PipelineMode
 ' =============================================================================
 
 ' Set Parameteres
-ConstTable (EditableConstants)
-  
 Const stname       = "ASFS_30"          ' ASFS Station name
 Const table1       = "slow"           ' "1 min" avg data filename
 Const table2       = "sumfile"        ' "summary" (i.e, 6 hr of 10 min avg) filename
@@ -67,7 +65,6 @@ Const crdfile_freq As Long = 30 ' [min]       ' Frequency of new files containin
 Const datafile_avg As Long = 60 ' [sec]       ' Data file averaging time: 60 = 1 min averages
 Const irid_offset  As Long = 0                ' The value is unique for each ASFS. Iridium data will be sent at staggered intervals between the stations
 
-EndConstTable
 
 ' Set Cals
 Const fp_A_s = 61.31/1000 ' 15614 Sensitivity [mV/(W/m2)]
@@ -167,8 +164,11 @@ Units vaisala_Td = degC
 Units vaisala_P = hPa
 
 ' EFOY
-Public efoy_dataINT32(6) As Long
-Public efoy_dataUINT16(6) As Long
+Public efoy_dataINT32tst As Long
+Public efoy_dataINT32int As Long
+Public efoy_dataUINT16bat As Long
+Public efoy_dataUINT16f As Long
+Public efoy_dataUINT16e As Long
 Public efoy_dataINT16 As Long
 Public efoy_result
 Public efoy_Ubat As Float
@@ -176,14 +176,12 @@ Public efoy_FuellSt As Float
 Public efoy_Error As Long
 Public efoy_Tst As Float
 Public efoy_Tint As Float 
-Public efoy_Twt As Float
 Public efoy_Laus As Float
 Units efoy_Ubat = V
 Units efoy_FuellSt = %
 Units efoy_Error = N
 Units efoy_Tst = degC
 Units efoy_Tint = degC
-Units efoy_Twt = degC
 Units efoy_Laus = A
 
 ' SR50
@@ -236,9 +234,7 @@ Units fp_B_mV = mV
 Units fp_B_Wm2 = Wm2
 
 ' Metek
-Public HandleM As Long
-Public metek_tcp_result
-Public metek_socket
+Public metek_422_result
 Public RawStringM As String * 15001
 Public SplitStringsM(101) As String * 150
 Public metekstr As String * 150
@@ -301,7 +297,7 @@ Units licor_co2_out = mg/m3
 Units licor_h2o_out = g/m3
 Units licor_t_out = degC
 Units licor_pr_out = Pa
-
+ 
 ' GPS 
 Public NMEAStrings(4) As String * 100 = {"$GPRMC","$GPGGA","$HEHDT","GPGZDA"}
 Public GPS_Data(25) As Double
@@ -471,8 +467,7 @@ DataTable (table1,true,-1)
    Average(1,efoy_Ubat,FP2,False)
    Average(1,efoy_Laus,FP2,False)
    Average(1,efoy_Tst,FP2,False)
-   Average(1,efoy_Tint,FP2,False)
-   Average(1,efoy_Twt,FP2,False)  
+   Average(1,efoy_Tint,FP2,False)  
          
 EndTable
 
@@ -509,8 +504,8 @@ DataTable (sumfile,true,36)
     Average (1,metek_x,FP2,False)               '21. X winds sonic (m/s *10, 4 char x 2): -127 >> -12.7 m/s
     Average (1,metek_y,FP2,False)               '22. Y winds sonic (m/s *10, 4 char x 2): -127 >> -12.7 m/s
     Average (1,metek_z,FP2,False)              '23. Z winds sonic  (m/s *100, 4 char x 2): -127 >> -1.27 m/s
-    Sample  (1, metek_heatstatus_out,UINT2,False)       '25: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
-    Sample  (1, metek_senspathstate_out,UINT2,False)    '26: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
+    Sample  (1,metek_heatstatus_out,UINT2,False)       '25: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
+    Sample  (1,metek_senspathstate_out,UINT2,False)    '26: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
     Average (1,sr30_swu_fantach,UINT2,False)            '28: SR30 fantach in Hz
     Average (1,sr30_swu_heatA,UINT2,False)              '29: SR30 fantach in Hz
     Average (1,sr30_swd_fantach,UINT2,False)            '30: SR30 heat amperage in mV 
@@ -569,6 +564,16 @@ DataTable(table4,true,-1)
 
 EndTable
 
+' This is for remote restarts
+' To manually reboot the logger, connect to the logger, go to the restarts DataTable 
+' and right-click on the "false" under ApplyAndRestart, View/Modify value and change
+' false to true.
+ConstTable (restarts)
+
+    Const restartstable = -1 
+
+EndConstTable
+
 ' =============================================================================
 
 
@@ -577,9 +582,10 @@ EndTable
 
 BeginProg
 
-    ' TCPOpen opens the ethernet port for reading, IP = sonic's IP, handle is the port handle             
-    metek_socket = TCPOpen (metekIP,metekPort,15001,100,HandleM,1) ' METEK: network
-    licor_socket = TCPOpen (licorIP,licorPort,9001,100,HandleL,1)  ' LICOR: network
+    ' TCPOpen opens the ethernet port for reading, IP = sonic's IP, handle is the port handle 
+    ' Field change, 2019 Oct 7: Sonic thru serial             
+    licor_socket = TCPOpen (licorIP,licorPort,6001,100,HandleL,1)  ' LICOR: network
+    SerialOpen (ComME,57600,0,0,12001)
     
     ' Be and NTP server
     ntp_server = NetworkTimeProtocol("", -1, 0)  
@@ -600,15 +606,15 @@ BeginProg
         ' Iridium Link
         SerialOpen(ComRS232,19200,0,0,2000)     
         
-        ' This is a continuous storage of metek and licor data in a ring buffer of size = lasst argument in bytes   
-        metek_tcp_result = SerialInBlock (HandleM,RawStringM,12001)
+        ' This is a continuous storage of metek and licor data in a ring buffer of size = last argument in bytes   
+        metek_422_result = SerialInBlock (ComME,RawStringM,12001)
         licor_tcp_result = SerialInBlock (HandleL,RawStringL,5001)
         
         ' If for some reason the metek or licor reboot the network line is interupted, we need to restart the
         ' the connection or else the logger won't receive the data anymore
-        If metek_tcp_result = 0 Then
-          TCPClose (metek_socket)
-          metek_socket = TCPOpen (metekIP,metekPort,15001,100,HandleM,1) 
+        If licor_socket = 0 OR licor_tcp_result = 0 Then
+          TCPClose (licor_socket)
+          licor_socket = TCPOpen (licorIP,licorPort,15001,100,HandleL,1)
         EndIf
         
         ' ***********************************************************************
@@ -679,9 +685,7 @@ BeginProg
              SendVariables(callback_result, ComRS232,4094, 4094, 0000, 2500,"Public","Callback",dummy,1)
           EndIf              
 
-        Else
-          PortSet(C2,0,1) ' make sure modem is off
-        EndIf          
+        EndIf
         ' *********************************************************************
 
 
@@ -850,10 +854,11 @@ BeginProg
         ' SR30 SWU
         ' There are 3 modbus calls here because we do not have access to reguisters 198, 40s
         ' We can get away with negating the wait argument, which will prevent delays if the instrument goes down
-        ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,3,5,2,15,3)
-        sr30_swu_DegC = sr30_swu_data(5) / 100
+        ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,3,5,2,15,3
         sr30_swu_IrrC = ( sr30_swu_data(1)*2^16 + sr30_swu_data(2) ) / 100
         sr30_swu_Irr  = ( sr30_swu_data(3)*2^16 + sr30_swu_data(4) ) / 100
+        ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,7,1,2,15,1)
+        sr30_swu_DegC = sr30_swu_data(1) / 100
         ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,195,3,1,15,3)
         sr30_swu_tilt   = sr30_swu_data(1) / 100 
         sr30_swu_fantach = sr30_swu_data(3) / 60 'Hz        
@@ -865,15 +870,16 @@ BeginProg
         ' There are 3 modbus calls here because we do not have access to reguisters 198, 40s
         ' We can get away with negating the wait argument, which will prevent delays if the instrument goes down
         ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,3,5,2,15,3)
-        sr30_swd_DegC = sr30_swd_data(5) / 100
         sr30_swd_IrrC = ( sr30_swd_data(1)*2^16 + sr30_swd_data(2) ) / 100
         sr30_swd_Irr  = ( sr30_swd_data(3)*2^16 + sr30_swd_data(4) ) / 100
+        ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,7,1,2,15,1)
+        sr30_swd_DegC = sr30_swd_data / 100
         ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,195,3,1,15,3)
         sr30_swd_tilt   = sr30_swd_data(1) / 100 
         sr30_swd_fantach = sr30_swd_data(3) / 60 'Hz        
         ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,199,1,1,15,3)
         sr30_swd_heatA   = sr30_swd_data(1) 'mA   
-        call_time_modbus_sr302 = Timer (1,mSec,4) 
+        call_time_modbus_sr302 = Timer (1,mSec,4)  
         
         ' Vaisala
         ' There are two separate calls because we do not have access to mid-range register
@@ -889,18 +895,19 @@ BeginProg
         call_time_modbus_vaisala = Timer (1,mSec,4) 
         SerialClose (ComC5)           
 
-        SerialOpen (ComC5,9600,2,0,100,4) 
-        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT32,30002,5,2,25,2)
-        efoy_Tst = efoy_dataINT32(1) * 0.001
-        efoy_Tint = efoy_dataINT32(3) * 0.001
-        efoy_Twt = efoy_dataINT32(5) * 0.001
-        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16,30016,1,2,15,3)
-        efoy_Ubat = efoy_dataUINT16(1) * 0.001
+        SerialOpen (ComC5,9600,2,0,100,4)
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT32tst,30002,1,2,15,2)
+        efoy_Tst = efoy_dataINT32tst * 0.001
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT32int,30004,1,2,15,2)
+        efoy_Tint = efoy_dataINT32int * 0.001
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16bat,30016,1,2,15,3)
+        efoy_Ubat = efoy_dataUINT16bat * 0.001
         ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT16,30029,1,2,15,1)
         efoy_Laus = efoy_dataINT16 * 0.001  
-        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16,30036,3,2,15,3)
-        efoy_FuellSt = efoy_dataUINT16(1) * 0.01
-        efoy_Error = efoy_dataUINT16(3)
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16f,30036,1,2,15,3)
+        efoy_FuellSt = efoy_dataUINT16f * 0.01
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16e,30038,1,2,15,3)
+        efoy_Error = efoy_dataUINT16e
         call_time_efoy = Timer (1,mSec,4) 
         SerialClose (ComC5)
         
