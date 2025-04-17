@@ -1,4 +1,4 @@
-Public PgmVersion As String = "ASFS30_600"
+Public PgmVersion As String = "ASFS30_601"
 '
 ' Autonomous Surface Flux System (ASFS) - MOSAiC
 ' ASFS 30
@@ -164,8 +164,6 @@ Units vaisala_Td = degC
 Units vaisala_P = hPa
 
 ' EFOY
-Public efoy_dataINT32tst As Long
-Public efoy_dataINT32int As Long
 Public efoy_dataUINT16bat As Long
 Public efoy_dataUINT16f As Long
 Public efoy_dataUINT16e As Long
@@ -174,14 +172,10 @@ Public efoy_result
 Public efoy_Ubat As Float
 Public efoy_FuellSt As Float
 Public efoy_Error As Long
-Public efoy_Tst As Float
-Public efoy_Tint As Float 
 Public efoy_Laus As Float
 Units efoy_Ubat = V
 Units efoy_FuellSt = %
 Units efoy_Error = N
-Units efoy_Tst = degC
-Units efoy_Tint = degC
 Units efoy_Laus = A
 
 ' SR50
@@ -465,9 +459,7 @@ DataTable (table1,true,-1)
    Maximum(1,efoy_Error,UINT2,False,False)
    Average(1,efoy_FuellSt,FP2,False)   
    Average(1,efoy_Ubat,FP2,False)
-   Average(1,efoy_Laus,FP2,False)
-   Average(1,efoy_Tst,FP2,False)
-   Average(1,efoy_Tint,FP2,False)  
+   Average(1,efoy_Laus,FP2,False) 
          
 EndTable
 
@@ -516,8 +508,7 @@ DataTable (sumfile,true,36)
     Average (1,efoy_FuellSt,FP2,False)                '36: calculated fuel remaining in %
     Average (1,efoy_Ubat,FP2,False)                   '37: output battery voltage in V
     Average (1,efoy_Laus,FP2,False)                   '38: output current in A
-    Average (1,efoy_Tint,FP2,False)                   '40: efoy internal temperature in C
-    
+ 
 EndTable  
 
 ' table1 is defined at the top. It is the Licor/Metek output. 
@@ -896,10 +887,6 @@ BeginProg
         SerialClose (ComC5)           
 
         SerialOpen (ComC5,9600,2,0,100,4)
-        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT32tst,30002,1,2,15,2)
-        efoy_Tst = efoy_dataINT32tst * 0.001
-        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT32int,30004,1,2,15,2)
-        efoy_Tint = efoy_dataINT32int * 0.001
         ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16bat,30016,1,2,15,3)
         efoy_Ubat = efoy_dataUINT16bat * 0.001
         ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT16,30029,1,2,15,1)
