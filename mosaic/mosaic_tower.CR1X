@@ -1,0 +1,415 @@
+Public PgmVersion As String = "mosaic_tower_305"
+'
+' MetCity Tower - MOSAiC
+'
+' CR1000 50474
+' Cal. Apr 2017
+'
+' Program author:     C. Cox christopher.j.cox@noaa.gov
+'
+' Updates:
+'   5/27/2019 - 6/4/2019   : version 101: Development on CR1000
+'   6/4/2019  - 6/17/2019  : version 201: Development on CR1000X
+'   6/17/2019 -            : version 301: Adding ASP TC, cleanup
+'   10/19/2019             : version 304 changed code to use the spare Met at 6m ModBus 13 , Dave Costa
+'   12/12/2019             : version 305 changed code back to use the orginal Met at 6 meters ModBus 2, Dave Costa
+'
+' -----------------------------------------------------------------------------
+'     Manuf.     Model        SN          Function    Ch             Note
+' -----------------------------------------------------------------------------
+'
+'     Vaisala    PTU300       P           met: t/p/q  MODBUS #3     RS485 19200,8,E,1 
+'     Vaisala    HMT330       P           met: t/p/q  MODBUS #2     RS485 19200,8,E,1 
+'     Vaisala    HMT330       P           met: t/p/q  MODBUS #1     RS485 19200,8,E,1    
+'     Campbell   SR50AH       8711        sfc ht      SDI-12 #1 C3
+'     Apogee     SI-4H1-SS    3287        sfc IR T    SDI-12 #2 C3
+'     Hukseflux  HFP01SC-10   5636        flux, c     D6
+'     Hukseflux  HFP01SC-10   5637        flux, c     D5
+'     Hemisphere V201                     gps         C7/C8         RS232 19200,8,N,1
+'     ASP TC                              delta T     SE1
+'     ASP TC                              delta T     SE2
+'     ASP TC                              delta T     SE3
+'     ASP TC                              delta T     SE4
+                                                            
+' -----------------------------------------------------------------------------
+
+PipelineMode
+
+' =============================================================================
+
+' Set Parameteres
+Const stname       = "MetCity"       ' ASFS Station name
+Const table1       = "tower_cr1000x" ' "1 min" avg data filename
+Const scan_freq    = 1  ' [sec]      ' the scan cycle
+
+' Set Cals
+Const fp_A_s = 63.00/1000 ' 5636 Sensitivity [mV/(W/m2)]
+Const fp_B_s = 63.91/1000 ' 5637 Sensitivity [mV/(W/m2)]
+
+' Some useful physical constants
+Const stefboltz = 5.67 * 10^-8  ' Stefan-Boltzmann constant
+Const K0 = 273.15               ' Conversion from Celcius to Kelvins
+
+
+' Declare Public Variables
+
+' Logger ...
+Public PTemp
+Public batt_volt
+Public call_time_mainscan
+Units PTemp = degC
+Units batt_volt = V
+Units call_time_mainscan = mSec
+
+' Vaisala
+Public vaisala_data_2m(44) As Long
+Public vaisala_val_2m
+Public vaisala_RH_Long_2m As Long
+Public vaisala_RH_2m As Float
+Public vaisala_T_Long_2m As Long
+Public vaisala_T_2m As Float
+Public vaisala_Td_Long_2m As Long
+Public vaisala_Td_2m As Float
+Public vaisala_P_Long_2m As Long
+Public vaisala_P_2m As Float
+Units vaisala_RH_2m = %
+Units vaisala_T_2m = degC
+Units vaisala_Td_2m = degC
+Units vaisala_P_2m = hPa
+
+Public vaisala_data_6m(8) As Long
+Public vaisala_val_6m
+Public vaisala_RH_Long_6m As Long
+Public vaisala_RH_6m As Float
+Public vaisala_T_Long_6m As Long
+Public vaisala_T_6m As Float
+Public vaisala_Td_Long_6m As Long
+Public vaisala_Td_6m As Float
+Units vaisala_RH_6m = %
+Units vaisala_T_6m = degC
+Units vaisala_Td_6m = degC
+
+Public vaisala_data_10m(8) As Long
+Public vaisala_val_10m
+Public vaisala_RH_Long_10m As Long
+Public vaisala_RH_10m As Float
+Public vaisala_T_Long_10m As Long
+Public vaisala_T_10m As Float
+Public vaisala_Td_Long_10m As Long
+Public vaisala_Td_10m As Float
+Units vaisala_RH_10m = %
+Units vaisala_T_10m = degC
+Units vaisala_Td_10m = degC
+
+' SR50
+Public sr50_dist
+Units sr50_dist=m
+
+' WXT530
+Public wxt_met(3)
+Public mast_T
+Public mast_RH
+Public mast_P
+Units mast_T=degC
+Units mast_RH=%
+Units mast_P=hPa
+
+' Apogee SI-4H1-SS 3287
+Public apogee(2) 
+Public apogee_body_T
+Public apogee_targ_T
+Units apogee_body_T = degC
+Units apogee_targ_T = degC
+
+' Flux Plate A
+Public fp_A_mV
+Public fp_A_Wm2
+Units fp_A_mV = mV
+Units fp_A_Wm2 = Wm2
+
+' Flux Plate B
+Public fp_B_mV
+Public fp_B_Wm2
+Units fp_B_mV = mV
+Units fp_B_Wm2 = Wm2
+
+' GPS 
+Public NMEAStrings(4) As String * 100 = {"$GPRMC","$GPGGA","$HEHDT","GPGZDA"}
+Public GPS_Data(25) As Double
+Public GGAparse(15) As String
+Public gps_lat_deg
+Public gps_lat_min As Double    
+Public gps_lon_deg    
+Public gps_lon_min As Double
+Public gps_alt    
+Public gps_hdg    
+Public gps_qc     
+Public gps_nsat 
+Public gps_hdop  
+Units gps_lat_deg = deg
+Units gps_lat_min = min
+Units gps_lon_deg = deg
+Units gps_lon_min = min
+Units gps_alt = m
+Units gps_hdg = deg
+Units gps_nsat = N
+Units gps_hdop = unitless
+
+' =============================================================================
+
+
+' =============================================================================
+' Define Data Tables.
+
+' table1 is defined at the top. It is the 1 min avg "slow" data
+' Saved to SD-card at in crdfile_freq (nominally 1-hr) blocks
+DataTable (table1,true,-1)
+  
+  DataInterval (0,0,Sec,10)
+  
+   ' GPS & Inclinometer
+   Sample (1,gps_lat_deg,FP2)  
+   Sample (1,gps_lat_min,IEEE4)          
+   Sample (1,gps_lon_deg,FP2)
+   Sample (1,gps_lon_min,IEEE4)
+   Sample (1,gps_hdg,IEEE4)      
+   Sample (1,gps_alt,IEEE4)  
+   Sample (1,gps_qc,UINT2) ' 'Fix quality: 0=invalid,1=gps fix,2=dgps fix,3=pps fix,4=real time kinematic,5=float rtk,6=estimate dead reckoning,7=manual input mode,8=simulation mode
+   Sample (1,gps_nsat,FP2,False) 'Number of satellites 
+   Sample (1,gps_hdop,FP2)   
+
+   ' Logger ...
+	 Sample (1,PTemp,FP2)
+   Sample (1,batt_volt,FP2)
+   ' This is used to count the # of 1s scans that are included in the
+	 ' 1m average: should be 60, but less is delays in slow sequence or skipped
+   Sample (1,call_time_mainscan,UINT2) 	
+
+   ' Apogee SI-4H1-SS 3287
+   Sample (1,apogee_body_T,IEEE4) 
+   Sample (1,apogee_targ_T,IEEE4) 
+   
+   ' SR50 
+   Sample (1,sr50_dist,IEEE4) 
+   
+   ' Vaisala
+   Sample (1,vaisala_RH_2m,IEEE4)  
+   Sample (1,vaisala_T_2m,IEEE4)  
+   Sample (1,vaisala_Td_2m,IEEE4) 
+   Sample (1,vaisala_P_2m,IEEE4) 
+   
+   Sample (1,vaisala_RH_6m,IEEE4)  
+   Sample (1,vaisala_T_6m,IEEE4) 
+   Sample (1,vaisala_Td_6m,IEEE4) 
+   
+   Sample (1,vaisala_RH_10m,IEEE4) 
+   Sample (1,vaisala_T_10m,IEEE4) 
+   Sample (1,vaisala_Td_10m,IEEE4)
+      
+   ' Flux Plate A  
+   Sample (1,fp_A_mV,IEEE4)
+   Sample (1,fp_A_Wm2,IEEE4)
+   
+   ' Flux Plate B   
+   Sample (1,fp_B_mV,IEEE4)
+   Sample (1,fp_B_Wm2,IEEE4)
+   
+   ' WXT 
+   Sample (1,mast_T,IEEE4)
+   Sample (1,mast_RH,IEEE4)
+   Sample (1,mast_P,IEEE4)
+    
+EndTable
+
+' =============================================================================
+
+
+' =============================================================================
+'Main Program
+
+BeginProg
+              
+    ' Main Scan. --------------------------------------------------------------
+    ' 1s, calls all tables
+    
+    ' Open serial ports:
+    ' This open is placed inside the scan loop so that the comport can be reopened automatically if closes for some unexpected reason 
+    ' RS485: Vaisala ComC5 (C5/C6) 19200,8,N,1       
+    SerialOpen (ComC5,19200,2,0,100,4)
+    ' GPS: ComC7 (C7/C8) is the RS232 port for GPS
+    SerialOpen (ComC7,19200,0,0,100)
+    ' OutString: Opening RS232 RJ45 to output GPS NMEA time strings (GPZDA) for NOAA Services to pick up with the Cincoze
+    SerialOpen (ComRS232,9600,0,0,100)
+        
+    Scan (scan_freq,Sec,0,0)
+      
+        ' Start a timer to time the scan interval
+        Timer(1,mSec,2)
+       
+    	  ' Logger ...
+    		PanelTemp (PTemp,60)
+    		Battery (batt_volt)
+    	
+        ' ******************************* GPS *********************************
+                
+        ' GPS is set to 1000 ms so the GPS command will not allow the logger
+        ' clock to be off by more than 1 second. We will likely keep time more
+        ' accurately than this from the ship so this clock set should only occur
+        ' if there is a problem we are not synching from the ship
+        
+        GPS (GPS_Data(),-ComC7,0,499,NMEAStrings)
+        gps_lat_deg = GPS_Data(1)
+        gps_lat_min = GPS_Data(2)
+        gps_lon_deg = GPS_Data(3)
+        gps_lon_min = GPS_Data(4)
+        gps_alt  = GPS_Data(10) * 1000 
+        gps_hdg  = GPS_Data(18) * 100  
+        gps_qc   = GPS_Data(8)  
+        gps_nsat = GPS_Data(9)
+        
+        ' Extract HDOP from GPGGA
+        SplitStr (GGAparse,NMEAStrings(2),",",15,5)
+        gps_hdop = GGAparse(9)
+   
+        ' Pass the time along to NOAA Services
+        SerialOut (ComRS232,NMEAStrings(1)+CHR(13)+CHR(10)+NMEAStrings(2)+CHR(13)+CHR(10),"",0,0)
+
+        ' -- This is the complete output. Not using all of it. --
+        ' GPS_Data(1) 'Degrees latitude (+ = North; - = South) [deg]
+        ' GPS_Data(2) 'Minutes latitude [min]
+        ' GPS_Data(3) 'Degress longitude (+ = East; - = West) [deg]
+        ' GPS_Data(4) 'Minutes longitude [min]
+        ' GPS_Data(5) 'Speed [m/s]
+        ' GPS_Data(6) 'Course over ground [deg]
+        ' GPS_Data(7) 'Magnetic variation from true north (+ = East; - = West) [unitless]
+        ' GPS_Data(8) 'GPS fix quality: 0 = invalid, 1 = GPS, 2 = differential GPS, 6 = estimated [unitless]
+        ' GPS_Data(9) 'Number of satellites used for fix [unitless]
+        ' GPS_Data(10) 'Antenna altitude [m]
+        ' GPS_Data(11) 'usec into sec of system clock when PPS rising edge occurs, typically 990,000 once synced [ms]
+        ' GPS_Data(12) 'Time since last GPRMC string, normally less than 1 second [s]
+        ' GPS_Data(13) 'Counts from 0 to 10, 10 = ready [unitless]
+        ' GPS_Data(14) 'Maximum value the clock was changed in msec [ms]
+        ' GPS_Data(15) 'Number of times the clock was changed [samples]
+        ' GPS_Data(16) 'Possibly end of transmission character, CHR(4)
+        ' GPS_Data(17) 'Unknown
+        ' GPS_Data(18) 'Heading [deg]
+        ' GPS_Data(19) 'Heading reference character, CHR(84) = T = true heading
+        ' GPS_Data(20) 'Unknown, possibly null character
+        ' GPS_Data(21) 'Unknown
+        ' GPS_Data(22) 'Time [hhmmss]
+        ' GPS_Data(23) 'Day of month [dd]
+        ' GPS_Data(24) 'Month [mo]
+        ' GPS_Data(25) 'Year [yyyy]    
+         
+        ' *********************************************************************
+
+        ' ************************* ANALOG DATA *******************************
+ 
+       ' Flux Plate A
+        VoltDiff (fp_A_mV,1,AutoRange,6,True ,0,_60Hz,1.0,0)
+        fp_A_Wm2 = fp_A_mV / fp_A_s
+    
+       ' Flux Plate B
+        VoltDiff (fp_B_mV,1,AutoRange,5,True ,0,_60Hz,1.0,0)
+        fp_B_Wm2 = fp_B_mV / fp_B_s
+     
+       ' *********************************************************************
+
+
+        ' ***************************** MODBUS ********************************  
+        
+        ' Vaisala
+        
+        ' 2 m PTU300: RH, T, Td, P
+        ModbusMaster (vaisala_val_2m,ComC5,19200,1,3,vaisala_data_2m,1,44,1,15,3)
+        vaisala_RH_Long_2m = vaisala_data_2m(2)*2^16 + vaisala_data_2m(1)   
+        MoveBytes (vaisala_RH_2m,0,vaisala_RH_Long_2m,0,4)    
+        vaisala_T_Long_2m = vaisala_data_2m(4)*2^16 + vaisala_data_2m(3)   
+        MoveBytes (vaisala_T_2m,0,vaisala_T_Long_2m,0,4)         
+        vaisala_Td_Long_2m = vaisala_data_2m(8)*2^16 + vaisala_data_2m(7)   
+        MoveBytes (vaisala_Td_2m,0,vaisala_Td_Long_2m,0,4)      
+        vaisala_P_Long_2m = vaisala_data_2m(44)*2^16 + vaisala_data_2m(43)   
+        MoveBytes (vaisala_P_2m,0,vaisala_P_Long_2m,0,4) 
+     
+        '  6 m and 10 m HMT330: only RH, T, Td; no P   
+'        ModbusMaster (vaisala_val_6m,ComC5,19200,13,3,vaisala_data_6m,1,8,1,15,3)changed modbus from2 to 13, replaced with spare,
+' Dave Oct 19 2019
+'       Switched back to the orginal 6 meter Met, ModBus 2, Dec 12, 2019  Dave Costa
+        ModbusMaster (vaisala_val_6m,ComC5,19200,2,3,vaisala_data_6m,1,8,1,15,3)
+        vaisala_RH_Long_6m = vaisala_data_6m(2)*2^16 + vaisala_data_6m(1)   
+        MoveBytes (vaisala_RH_6m,0,vaisala_RH_Long_6m,0,4)    
+        vaisala_T_Long_6m = vaisala_data_6m(4)*2^16 + vaisala_data_6m(3)   
+        MoveBytes (vaisala_T_6m,0,vaisala_T_Long_6m,0,4)         
+        vaisala_Td_Long_6m = vaisala_data_6m(8)*2^16 + vaisala_data_6m(7)   
+        MoveBytes (vaisala_Td_6m,0,vaisala_Td_Long_6m,0,4)      
+        
+        ModbusMaster (vaisala_val_10m,ComC5,19200,3,3,vaisala_data_10m,1,8,1,15,3)
+        vaisala_RH_Long_10m = vaisala_data_10m(2)*2^16 + vaisala_data_10m(1)   
+        MoveBytes (vaisala_RH_10m,0,vaisala_RH_Long_10m,0,4)    
+        vaisala_T_Long_10m = vaisala_data_10m(4)*2^16 + vaisala_data_10m(3)   
+        MoveBytes (vaisala_T_10m,0,vaisala_T_Long_10m,0,4)         
+        vaisala_Td_Long_10m = vaisala_data_10m(8)*2^16 + vaisala_data_10m(7)   
+        MoveBytes (vaisala_Td_10m,0,vaisala_Td_Long_10m,0,4)      
+            
+        ' *********************************************************************  
+      
+        ' Time taken to get through the scan in ms
+        call_time_mainscan = Timer (1,mSec,4) 
+        
+        ' Data Table
+        CallTable table1
+            
+  NextScan
+
+
+' SDI-12 devices are placed in slow sequence because the protocol is slow
+'
+'' WXT is taken every 10 s
+'SlowSequence
+'
+'      Scan (10,Sec,0,0)
+'        
+'        ' WXT530 Vaisala on Mast
+'        SDI12Recorder(wxt_met(),C3,0,"M2!",1.0,0)
+'        mast_T = wxt_met(1)
+'        mast_RH = wxt_met(2)
+'        mast_P = wxt_met(3)
+'        
+'      NextScan      
+
+' SR50 is only taken every 5 s
+SlowSequence
+
+      Scan (5,Sec,0,0)
+
+        ' SR50
+        SDI12Recorder(sr50_dist,C3,1,"M1!",1.0,0)
+        
+        ' WXT530 Vaisala on Mast
+        SDI12Recorder(wxt_met(),C3,0,"M2!",1.0,0)
+        mast_T = wxt_met(1)
+        mast_RH = wxt_met(2)
+        mast_P = wxt_met(3)
+        
+      NextScan
+ 
+' IRT is taken every 1 s 
+SlowSequence
+
+      Scan (1,Sec,0,0)
+        
+        ' Apogee SI-4H1-SS 3287
+        SDI12Recorder(apogee,C1,2,"M1!",1.0,0)
+        ' Orginal code 
+        'apogee_body_T = apogee(1)
+        'apogee_targ_T = apogee(2)
+        ' Changed code to switch variables.  Dave Costa Nov 12, 2019
+        apogee_body_T = apogee(2)
+        apogee_targ_T = apogee(1)        
+      NextScan
+
+      
+EndProg
+
+' =============================================================================
+   %        
