@@ -1,4 +1,4 @@
-Public PgmVersion As String = "ASFS50_SPLASH_801"
+Public PgmVersion As String = "ASFS50_SPLASH_802"
 
 ' Autonomous Surface Flux System (ASFS) - MOSAiC
 ' ASFS 50
@@ -22,6 +22,7 @@ Public PgmVersion As String = "ASFS50_SPLASH_801"
 '   4/5/2020 - ASFS-CO. Removed Iridium, added Licor, ...
 '   4/6/2020 - changed the flux plate cal because the new flux plate is a spare (5693)
 '   5/31/2020 : for leg 4, FPB ready, with licor, changed the base station number...
+'   9/29/2021 : splash deploy. reducing iridium load
 '
 ' -----------------------------------------------------------------------------
 '     Manuf.     Model        SN          Function    Ch             Note
@@ -43,7 +44,7 @@ Public PgmVersion As String = "ASFS50_SPLASH_801"
 
 ' -----------------------------------------------------------------------------
 
-PipelineMode
+PipeLineMode
 
 ' =============================================================================
 
@@ -58,21 +59,29 @@ Const licorPort As Long    = 7200                ' TCP/IP port number used by th
 Const licorIP              = "192.168.202.54"    ' IP assigned to licor 7500ds
 Const shipradioIP          = "192.168.202.6"     ' IP for the base station (ship side) radio
 Const asfsradioIP          = "192.168.202.53"    ' IP for this asfs station radio
-Const base_no              = "00881632669565"    ' base station number for the spare iridium modem pair used in container beginning in may 2020
+Const base_no              = "xxxxxxxxxxxxxx"    ' base station number for the spare iridium modem pair used in container beginning in may 2020
 Const scan_freq    As Long = 5  ' [sec]          ' the scan cycle
 Const sumfile_avg  As Long = 10 ' [min]          ' Summary file averaging period: 10 = 10 min averages
 Const sumfile_freq As Long = 60 ' [min]          ' How often do you want to send summary files if on iridium?
+Const engfile_avg  As Long = 1440 ' [min]          ' Summary file averaging period: 10 = 10 min averages
+Const engfile_freq As Long = 1440 ' [min]          ' How often do you want to send summary files if on iridium?
 Const crdfile_freq As Long = 30 ' [min]          ' Frequency of new files containing 20 Hz data 
 Const crdsoil_freq As Long = 1  ' [day]          ' How often to write soil data to card
 Const datafile_avg As Long = 60 ' [sec]          ' Data file averaging time: 60 = 1 min averages
 Const soilfile_avg As Long = 60 ' [min]          ' Data file averaging time: 60 = 60 min averages
-Const irid_offset  As Long = 0                   ' The value is unique for each ASFS. Iridium data will be sent at staggered intervals between the stations
+Const irid_offset  As Long = 27                   ' The value is unique for each ASFS. Iridium data will be sent at staggered intervals between the stations
 
 ' Set Cals
 Const fp_A_s = 61.26/1000 ' 5693 Sensitivity [mV/(W/m2)]
 Const fp_B_s = 0 ' Sensitivity [mV/(W/m2)]
-Const ir20_lwd_s = 11.42/1000 ' 4064 Sensitivity [mV/(W/m2)] 
+Const ir20_lwd_s = 12.02/1000 ' 4060 Sensitivity [mV/(W/m2)] 
+Const ir20_lwd_acoef = -16.32e-6
+Const ir20_lwd_bcoef = 2.54e-3
+Const ir20_lwd_ccoef = 0.9557
 Const ir20_lwu_s = 12.01/1000 ' 4062 Sensitivity [mV/(W/m2)]
+Const ir20_lwu_acoef = -16.58e-6
+Const ir20_lwu_bcoef = 2.49e-3
+Const ir20_lwu_ccoef = 0.9568
 
 ' Some useful physical constants
 Const stefboltz = 5.67 * 10^-8  ' Stefan-Boltzmann constant
@@ -526,18 +535,10 @@ EndTable
 DataTable (sum_table,true,36)
  
    DataInterval (0,sumfile_avg,Min,10)
-                                                       
-    Average (1,gps_lat_deg,UINT2,False)                
-    Average (1,gps_lat_min,IEEE4,False)                   
-    Average (1,gps_lon_deg,UINT2,False)
-    Average (1,gps_lon_min,IEEE4,False)            
-    Average (1,gps_hdg,FP2,False)                           
-    Average (1,gps_alt,FP2,False)                   
-    Average (1,metek_InclX,FP2,False)                            
-    Average (1,metek_InclY,FP2,False)      
+                                                                             
     Average (1,PTemp,FP2,False)                  
     Totalize (1,counts_main,UINT2,False)	          
-    Average (1,vaisala_P,IEEE4,False)              
+    Average (1,vaisala_P,FP2,False)              
     Average (1,vaisala_T,FP2,False)              
     Average (1,vaisala_RH,FP2,False)             
     Average (1,apogee_targ_T,FP2,False)          
@@ -548,24 +549,27 @@ DataTable (sum_table,true,36)
     Average (1,sr30_swu_IrrC,FP2,False)                
     Average (1,fp_A_Wm2,FP2,False)                 
     Average (1,fp_B_Wm2,FP2,False)                        
-    Average (1,metek_x(),FP2,False)             
-    StdDev (1,metek_x(),FP2,False)                      
-    Average (1,metek_y(),FP2,False)               
-    StdDev (1,metek_y(),FP2,False)        
-    Average (1,metek_z(),FP2,False)              
-    StdDev (1,metek_z(),FP2,False)      
+    Average (1,metek_x(),FP2,False)                                 
+    Average (1,metek_y(),FP2,False)                    
+        
+EndTable  
+
+DataTable (eng_table,true,36)
+ 
+   DataInterval (0,engfile_avg,Min,10)
+   
     Sample  (1,metek_senspathstate_out,UINT2,False)   
     Average (1,sr30_swu_fantach,UINT2,False)           
     Average (1,sr30_swu_heatA,UINT2,False)              
     Average (1,sr30_swd_fantach,UINT2,False)           
     Average (1,sr30_swd_heatA,UINT2,False)          
     Average (1,sr30_swu_tilt,FP2,False)         
-    Average (1,sr30_swd_tilt,FP2,False)    
-    Average (1,ir20_lwu_DegC,FP2,False)
-    Average (1,ir20_lwd_DegC,FP2,False)      
- 
-EndTable  
-
+    Average (1,sr30_swd_tilt,FP2,False) 
+    Average (1,metek_InclX,FP2,False)                            
+    Average (1,metek_InclY,FP2,False) 
+    
+EndTable
+    
 ' fast data
 ' Saved to SD-card at in crdfile_freq (nominally 1-hr) blocks
 ' 36000 limits this table to 0.5 hours
@@ -735,18 +739,18 @@ BeginProg
         If IfTime (irid_offset+3,sumfile_freq,Min) Then 
           Call_Modem = True
         EndIf 
-'        
-'        If Flag(1)= True Then
-'          If Call_Modem = True Then
-'            
-'            'Send ATDT dialing command from 9522B to force modem registration on Iridium network
-'            Register_Modem = "ATDT1234" & CHR(13) & CHR(10)
-'            SerialOut(ComRS232, Register_Modem,"",0,0)
-'            Call_Modem = false
-'            Flag(1)=False
-'            
-'          EndIf
-'        EndIf
+        
+        If Flag(1)= True Then
+          If Call_Modem = True Then
+            
+            'Send ATDT dialing command from 9522B to force modem registration on Iridium network
+            Register_Modem = "ATDT1234" & CHR(13) & CHR(10)
+            SerialOut(ComRS232, Register_Modem,"",0,0)
+            Call_Modem = false
+            Flag(1)=False
+            
+          EndIf
+        EndIf
         ' *********************************************************************
 
 
@@ -888,7 +892,7 @@ BeginProg
         BrHalf (ir20_lwu_Case_R,1,AutoRange,5,Vx1,1,250,True ,0,50,1,0)
         ir20_lwu_Case_R   = RefR * (ir20_lwu_Case_R / (1 - ir20_lwu_Case_R))
         ir20_lwu_DegC     = 1/(0.0010295 + 0.0002391 * LN(ir20_lwu_Case_R) + 0.0000001568 * LN(ir20_lwu_Case_R)^3) - K0
-        ir20_lwu_Wm2        = (ir20_lwu_mV / ir20_lwu_s) + stefboltz * (ir20_lwu_DegC+K0)^4
+        ir20_lwu_Wm2        = (ir20_lwu_mV / ir20_lwu_s)*(ir20_lwu_acoef*ir20_lwu_DegC^2+ir20_lwu_bcoef*ir20_lwu_DegC+ir20_lwu_ccoef) + stefboltz * (ir20_lwu_DegC+K0)^4               
         VoltSe (ir20_lwu_fan,1,mv5000,7,True ,0,50,1.0,0)
        
         ' Hukseflux IR20 LWD
@@ -896,7 +900,7 @@ BeginProg
         BrHalf (ir20_lwd_Case_R,1,AutoRange,6,Vx2,1,250,True ,0,50,1,0)
         ir20_lwd_Case_R   = RefR * (ir20_lwd_Case_R / (1 - ir20_lwd_Case_R))
         ir20_lwd_DegC     = 1/(0.0010295 + 0.0002391 * LN(ir20_lwd_Case_R) + 0.0000001568 * LN(ir20_lwd_Case_R)^3) - K0
-        ir20_lwd_Wm2        = (ir20_lwd_mV / ir20_lwd_s) + stefboltz * (ir20_lwd_DegC+K0)^4
+        ir20_lwd_Wm2        = (ir20_lwd_mV / ir20_lwd_s)*(ir20_lwd_acoef*ir20_lwd_DegC^2+ir20_lwd_bcoef*ir20_lwd_DegC+ir20_lwd_ccoef) + stefboltz * (ir20_lwd_DegC+K0)^4
         VoltSe (ir20_lwd_fan,1,mv5000,8,True ,0,50,1.0,0)        
 
        ' Flux Plate A
