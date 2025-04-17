@@ -1,0 +1,950 @@
+Public PgmVersion As String = "ASFS40_505"
+'
+' Autonomous Surface Flux System (ASFS) - MOSAiC
+' ASFS 1
+'
+' CR1000X 9704
+' Cal. May 2018
+'
+' Program author:     C. Cox christopher.j.cox@noaa.gov
+' Iridum/Radio calls: S. Pezoa sergio.pezoa@noaa.gov
+'                     J. Osborn jackson.osborn@noaa.gov
+'
+' Updates:
+'   9/18/2018 - 2/13/2019: version ASFS_1xx (100-118): Development Phase LLLL = 3768
+'   2/13/2019 - 4/16/2019: version ASFS_2xx (200-210): Testing Phase     LLLL = 4323
+'   4/16/2019 - 5/4/2019:  version ASFS_3xx (300-302): Outdoor tests / comms LLLL = 4323
+'   5/4/2019  - 7/1/2019:  version ASFS_4xx (401-409): Dialing it in LLLL = 4323
+'   7/12/2019 -         :  version ASFS_NN_5xx       : All three stations together 
+'
+'
+' -----------------------------------------------------------------------------
+'     Manuf.     Model        SN          Function    Ch             Note
+' -----------------------------------------------------------------------------
+
+'     Hukseflux  SR30         2488        SWU         MODBUS #1     19200,E,1,8 
+'     Hukseflux  SR30         2489        SWD         MODBUS #2     19200,E,1,8
+'     Vaisala    PTU300       P2120078    met: t/p/q  MODBUS #3     19200,E,1,8  
+'     EFOY       EFOY Pro2400 *44176      Power Gen   MODBUS #4     RS232 9600,E,1,8
+'     Hukseflux  IR20         4047        LWU         D2/SE5        Temp is 2-wire
+'     Hukseflux  IR20         4048        LWD         D1/SE8        Temp is 2-wire
+'     Campbell   SR50AH       8711        sfc ht      SDI-12 #1 C1
+'     Apogee     SI-4H1-SS    3287        sfc IR T    SDI-12 #2 C3
+'     Metek      uSonic-3     0111067257  3d winds    Network       192.168.202.44:7200 & ComME
+'     Licor      7500-DS                  h2o/co2     Network       192.168.202.45:5001
+'     Hukseflux  HFP01SC-10   15613       flux, c     D5
+'     Hukseflux  HFP01SC-10   15617       flux, c     D6
+'     Hemisphere v102         *01-150     GPS         RS232 C7/C8   38400,N,1,8                                                                
+
+' -----------------------------------------------------------------------------
+
+PipelineMode
+
+' =============================================================================
+
+' Set Parameteres
+Const stname       = "ASFS_40"          ' ASFS Station name
+Const table1       = "slow"           ' "1 min" avg data filename
+Const table2       = "sumfile"        ' "summary" (i.e, 6 hr of 10 min avg) filename
+Const table3       = "fast"           ' "fast" (i.e., 20 Hz) filename
+Const table4       = "met"            ' 5s vaisala data
+Const metekPort As Long = 5001             ' TCP/IP port number used by the sonic
+Const licorPort As Long = 7200             ' TCP/IP port number used by the licor
+Const loggerIP     = "192.168.202.40"   ' IP assigned to this logger
+Const NTPServIP    = "10.10.10.10"    ' NTP Server IP address for setting the logger clock
+Const metekIP      = "192.168.202.45"   ' IP assigned to metek sonic
+Const licorIP      = "192.168.202.44"   ' IP assigned to licor 7500ds
+Const IridiumIP    = "192.168.1.50"   ' Iridium Modem Registration
+Const shipradioIP  = "192.168.202.6"    ' IP for the base station (ship side) radio
+Const asfsradioIP  = "192.168.202.43"  ' IP for this asfs station radio
+Const base_no      = "00881632670269" ' Base station modem phone number
+Const scan_freq    As Long = 5  ' [sec]       ' the scan cycle
+Const sumfile_avg  As Long = 10 ' [min]       ' Summary file averaging period: 10 = 10 min averages
+Const sumfile_freq As Long = 360 ' [min]      ' How often do you want to send summary files if on iridium?
+Const crdfile_freq As Long = 30 ' [min]       ' Frequency of new files containing 20 Hz data 
+Const datafile_avg As Long = 60 ' [sec]       ' Data file averaging time: 60 = 1 min averages
+Const irid_offset  As Long = 11               ' The value is unique for each ASFS. Iridium data will be sent at staggered intervals between the stations
+
+
+
+' Set Cals
+Const fp_A_s = 62.19/1000 ' Sensitivity [mV/(W/m2)]
+Const fp_B_s = 61.03/1000 ' Sensitivity [mV/(W/m2)]
+Const ir20_lwd_s = 9.52/1000 ' Sensitivity [mV/(W/m2)] 
+Const ir20_lwu_s = 8.99/1000 ' Sensitivity [mV/(W/m2)]
+
+' Some useful physical constants
+Const stefboltz = 5.67 * 10^-8  ' Stefan-Boltzmann constant
+Const K0 = 273.15               ' Conversion from Celcius to Kelvins
+Const RefR = 100000             ' Reference resistor in Ohms
+
+
+' Declare Public Variables
+
+' Logger ...
+Public PTemp
+Public batt_volt
+Public counts_main
+Public call_time_mainscan
+Public call_time_modbus_sr301
+Public call_time_modbus_sr302
+Public call_time_modbus_vaisala
+Public call_time_efoy
+Public call_time_sdi1
+Public call_time_sdi2
+Units PTemp = degC
+Units batt_volt = V
+Units counts_main = N
+Units call_time_mainscan = mSec
+Units call_time_modbus_sr301 = mSec
+Units call_time_modbus_sr302 = mSec
+Units call_time_modbus_vaisala = mSec
+Units call_time_sdi1 = mSec
+Units call_time_sdi2 = mSec
+Units call_time_efoy = mSec
+
+'TPC comm
+Public SetupStr As String * 51 'Variables for Iridium Configuration
+Public Configure_Modem As Boolean 'Variables for Iridium Configuration
+Public Register_Modem As String 'Iridium Modem Registration
+Public Call_Modem As Boolean
+Public PingMe, Flag(1) As Boolean
+Public DialSuccess
+
+DialSequence(4094)
+  DialSuccess = DialModem (ComRS232,19200,base_no,"CONNECT")
+EndDialSequence(DialSuccess)
+
+' SR30 SWU
+Public sr30_swu_data(5) As Long
+Public sr30_swu_DegC 
+Public sr30_swu_IrrC
+Public sr30_swu_Irr
+Public sr30_swu_val
+Public sr30_swu_fantach
+Public sr30_swu_heatA
+Public sr30_swu_tilt
+Units sr30_swu_DegC = degC
+Units sr30_swu_IrrC = Wm2
+Units sr30_swu_Irr = Wm2
+Units sr30_swu_fantach = Hz
+Units sr30_swu_heatA = mA  
+Units sr30_swu_tilt = deg 
+
+' SR30 SWD
+Public sr30_swd_data(5) As Long
+Public sr30_swd_DegC 
+Public sr30_swd_IrrC
+Public sr30_swd_Irr
+Public sr30_swd_val
+Public sr30_swd_fantach
+Public sr30_swd_heatA
+Public sr30_swd_tilt
+Units sr30_swd_DegC = degC
+Units sr30_swd_IrrC = Wm2
+Units sr30_swd_Irr = Wm2
+Units sr30_swd_fantach = Hz
+Units sr30_swd_heatA = mA
+Units sr30_swd_tilt = deg   
+
+' Vaisala
+Public vaisala_data(44) As Long
+Public vaisala_val
+Public vaisala_RH_Long As Long
+Public vaisala_RH As Float
+Public vaisala_T_Long As Long
+Public vaisala_T As Float
+Public vaisala_Td_Long As Long
+Public vaisala_Td As Float
+Public vaisala_P_Long As Long
+Public vaisala_P As Float
+Units vaisala_RH = %
+Units vaisala_T = degC
+Units vaisala_Td = degC
+Units vaisala_P = hPa
+
+' EFOY
+Public efoy_dataINT32(6) As Long
+Public efoy_dataUINT16(6) As Long
+Public efoy_dataINT16 As Long
+Public efoy_result
+Public efoy_Ubat As Float
+Public efoy_FuellSt As Float
+Public efoy_Error As Long
+Public efoy_Tst As Float
+Public efoy_Tint As Float 
+Public efoy_Twt As Float
+Public efoy_Laus As Float
+Units efoy_Ubat = V
+Units efoy_FuellSt = %
+Units efoy_Error = N
+Units efoy_Tst = degC
+Units efoy_Tint = degC
+Units efoy_Twt = degC
+Units efoy_Laus = A
+
+' SR50
+Public sr50data(2)
+Public sr50_qc
+Public sr50_dist
+Units sr50_dist=m
+
+' Apogee SI-4H1-SS 3287
+Public apogee(2) 
+Public apogee_body_T
+Public apogee_targ_T
+Units apogee_body_T = degC
+Units apogee_targ_T = degC
+
+' Hukseflux IR20 LWU
+Public ir20_lwu_DegC
+Public ir20_lwu_Case_R
+Public ir20_lwu_mV
+Public ir20_lwu_Wm2
+Public ir20_lwu_fan
+Units ir20_lwu_DegC = degC
+Units ir20_lwu_Case_R = ohms
+Units ir20_lwu_mV = mV
+Units ir20_lwu_Wm2 = Wm2
+Units ir20_lwu_fan = mV
+
+' Hukseflux IR20 LWD
+Public ir20_lwd_DegC
+Public ir20_lwd_Case_R
+Public ir20_lwd_mV
+Public ir20_lwd_Wm2
+Public ir20_lwd_fan
+Units ir20_lwd_DegC = degC
+Units ir20_lwd_Case_R = ohms
+Units ir20_lwd_mV = mV
+Units ir20_lwd_Wm2 = Wm2
+Units ir20_lwd_fan = mV
+
+' Flux Plate A
+Public fp_A_mV
+Public fp_A_Wm2
+Units fp_A_mV = mV
+Units fp_A_Wm2 = Wm2
+
+' Flux Plate B
+Public fp_B_mV
+Public fp_B_Wm2
+Units fp_B_mV = mV
+Units fp_B_Wm2 = Wm2
+
+' Metek
+Public HandleM As Long
+Public metek_tcp_result
+Public metek_socket
+Public RawStringM As String * 15001
+Public SplitStringsM(101) As String * 150
+Public metekstr As String * 150
+Public SplitStringsM2(14) As String * 25
+Public metek_heatstatus(101)
+Public metek_senspathstate(101)
+Public metek_allpathstate(101)
+Public metek_x(101)
+Public metek_y(101)
+Public metek_z(101)
+Public metek_T(101)
+Public metek_InclX(101)
+Public metek_InclY(101)  
+Units metek_x = m/s
+Units metek_y = m/s
+Units metek_z = m/s
+Units metek_T = degC
+Units metek_InclX = deg
+Units metek_InclY = deg
+
+' Licor
+Public HandleL As Long
+Public licor_tcp_result
+Public licor_socket
+Public RawStringL As String * 9000
+Public SplitStringsL(101) As String * 150
+Public licorstr As String * 150
+Public SplitStringsL2(9) As String * 25
+Public licor_diag(101)
+Public licor_co2(101)
+Public licor_h2o(101)
+Public licor_co2_str(101)
+Public licor_pr(101)
+Public licor_t(101)
+
+' These varibles will be written to the file, extracted from licor/metek above
+Public metek_heatstatus_out
+Public metek_senspathstate_out
+Public metek_allpathstate_out
+Public metek_diag_out As String * 5
+Public metek_x_out
+Public metek_y_out 
+Public metek_z_out 
+Public metek_T_out 
+Public metek_InclX_out
+Public metek_InclY_out  
+Public licor_diag_out
+Public licor_co2_out
+Public licor_h2o_out
+Public licor_co2_str_out
+Public licor_pr_out
+Public licor_t_out
+Units metek_heatstatus_out = code
+Units metek_senspathstate_out = N
+Units metek_allpathstate_out = %
+Units metek_diag_out = N
+Units metek_x_out = mm/s
+Units metek_y_out = mm/s
+Units metek_z_out = mm/s
+Units metek_T_out = degC 
+Units metek_InclX_out = deg
+Units metek_InclY_out = deg
+Units licor_diag_out = code
+Units licor_co2_out = mg/m3
+Units licor_h2o_out = g/m3
+Units licor_t_out = degC
+Units licor_pr_out = Pa
+
+' GPS 
+Public NMEAStrings(4) As String * 100 = {"$GPRMC","$GPGGA","$HEHDT","GPGZDA"}
+Public GPS_Data(25) As Double
+Public GGAparse(15) As String
+Public gps_lat_deg
+Public gps_lat_min As Double   
+Public gps_lon_deg    
+Public gps_lon_min As Double
+Public gps_alt    
+Public gps_hdg    
+Public gps_qc     
+Public gps_nsat 
+Public gps_hdop  
+Units gps_lat_deg = deg
+Units gps_lat_min = min
+Units gps_lon_deg = deg
+Units gps_lon_min = min
+Units gps_alt = m
+Units gps_hdg = deg
+Units gps_nsat = N
+Units gps_hdop = unitless
+
+' Other; just stuff needed along the way
+Public OutStatS As Boolean, LastFileNameS As String * 50
+Public OutStatF As Boolean, LastFileNameF As String * 50
+Public OutStatV As Boolean, LastFileNameV As String * 50
+Public k, callback_result, dummy, ntp_server
+' =============================================================================
+
+
+' =============================================================================
+' Define Data Tables.
+
+' table1 is defined at the top. It is the 1 min avg "slow" data
+' Saved to SD-card at in crdfile_freq (nominally 1-hr) blocks
+DataTable (table1,true,-1)
+  
+  DataInterval (0,datafile_avg,Sec,10)
+  
+   TableFile ("CRD:"+table1,13,-1,0,crdfile_freq,Min,OutStatS,LastFileNameS)
+ 	
+   ' GPS & Inclinometer
+   Average (1,gps_lat_deg,FP2,False)   
+   Average (1,gps_lat_min,IEEE8,False)  
+   Average (1,gps_lon_deg,FP2,False)           
+   Average (1,gps_lon_min,IEEE8,False)
+   Average (1,gps_hdg,IEEE4,False)      
+   Average (1,gps_alt,IEEE4,False)  
+   Sample  (1,gps_qc,UINT2) ' 'Fix quality: 0=invalid,1=gps fix,2=dgps fix,3=pps fix,4=real time kinematic,5=float rtk,6=estimate dead reckoning,7=manual input mode,8=simulation mode
+   Average (1,gps_hdop,FP2,False)    
+   Average (1,gps_nsat,FP2,False) 'Number of satellites 
+   Average (1,metek_InclX(),IEEE4,False)                              
+   Average (1,metek_InclY(),IEEE4,False)
+       
+   ' Logger ...
+	 Average (1,PTemp,FP2,False)
+   Average (1,batt_volt,FP2,False)
+   ' This is used to count the # of 1s scans that are included in the
+	 ' 1m average: should be 60, but less is delays in slow sequence or skipped
+   Totalize (1,counts_main,UINT2,False)
+   Maximum (1,call_time_mainscan,UINT2,False,False)
+   Maximum (1,call_time_modbus_sr301,UINT2,False,False)
+   Maximum (1,call_time_modbus_sr302,UINT2,False,False)
+   Maximum (1,call_time_modbus_vaisala,UINT2,False,False)
+   Maximum (1,call_time_sdi1,UINT2,False,False)
+   Maximum (1,call_time_sdi2,UINT2,False,False)
+   Maximum (1,call_time_efoy,UINT2,False,False)
+   
+  ' SR30 SWU
+   Average (1,sr30_swu_DegC,IEEE4,False) 
+   StdDev  (1,sr30_swu_DegC,IEEE4,False)   
+   Average (1,sr30_swu_Irr,IEEE4,False) 
+   StdDev  (1,sr30_swu_Irr,IEEE4,False)
+   Average (1,sr30_swu_IrrC,IEEE4,False)
+   StdDev  (1,sr30_swu_IrrC,IEEE4,False)  
+   
+  ' SR30 SWD
+   Average (1,sr30_swd_DegC,IEEE4,False) 
+   StdDev  (1,sr30_swd_DegC,IEEE4,False)   
+   Average (1,sr30_swd_Irr,IEEE4,False) 
+   StdDev  (1,sr30_swd_Irr,IEEE4,False)
+   Average (1,sr30_swd_IrrC,IEEE4,False)
+   StdDev  (1,sr30_swd_IrrC,IEEE4,False)   
+   
+   ' Apogee SI-4H1-SS 3287
+   Average (1,apogee_body_T,IEEE4,False) 
+   StdDev  (1,apogee_body_T,IEEE4,False) 
+   Average (1,apogee_targ_T,IEEE4,False) 
+   StdDev  (1,apogee_targ_T,IEEE4,False) 
+   
+   ' SR50 
+   Average (1,sr50_dist,IEEE4,False) 
+   StdDev  (1,sr50_dist,IEEE4,False) 
+   Average (1,sr50_qc,UINT2,False) 
+   
+   ' Vaisala
+   Average (1,vaisala_RH,IEEE4,False) 
+   StdDev  (1,vaisala_RH,IEEE4,False) 
+   Average (1,vaisala_T,IEEE4,False) 
+   StdDev  (1,vaisala_T,IEEE4,False) 
+   Average (1,vaisala_Td,IEEE4,False)
+   StdDev  (1,vaisala_Td,IEEE4,False)  
+   Average (1,vaisala_P,IEEE4,False) 
+   StdDev  (1,vaisala_P,IEEE4,False)
+   
+   ' Metek
+   Average (1,metek_x(),IEEE4,False)
+   StdDev  (1,metek_x(),IEEE4,False)
+   Average (1,metek_y(),IEEE4,False)
+   StdDev  (1,metek_y(),IEEE4,False)
+   Average (1,metek_z(),IEEE4,False)   
+   StdDev  (1,metek_z(),IEEE4,False) 
+        
+   ' Hukseflux IR20 LWU   
+   Average (1,ir20_lwu_mV,IEEE4,False)
+   StdDev  (1,ir20_lwu_mV,IEEE4,False)
+   Average (1,ir20_lwu_Case_R,IEEE4,False)
+   StdDev  (1,ir20_lwu_Case_R,IEEE4,False)
+   Average (1,ir20_lwu_DegC,IEEE4,False) 
+   StdDev  (1,ir20_lwu_DegC,IEEE4,False) 
+   Average (1,ir20_lwu_Wm2,IEEE4,False)
+   StdDev  (1,ir20_lwu_Wm2,IEEE4,False) 
+  
+   ' Hukseflux IR20 LWD    
+   Average (1,ir20_lwd_mV,IEEE4,False)
+   StdDev  (1,ir20_lwd_mV,IEEE4,False)
+   Average (1,ir20_lwd_Case_R,IEEE4,False)
+   StdDev  (1,ir20_lwd_Case_R,IEEE4,False)
+   Average (1,ir20_lwd_DegC,IEEE4,False) 
+   StdDev  (1,ir20_lwd_DegC,IEEE4,False)
+   Average (1,ir20_lwd_Wm2,IEEE4,False) 
+   StdDev  (1,ir20_lwd_Wm2,IEEE4,False)
+   
+   ' Flux Plate A  
+   Average (1,fp_A_mV,IEEE4,False)
+   StdDev  (1,fp_A_mV,IEEE4,False) 
+   Average (1,fp_A_Wm2,IEEE4,False)
+   StdDev  (1,fp_A_Wm2,IEEE4,False)
+   
+   ' Flux Plate B   
+   Average (1,fp_B_mV,IEEE4,False)
+   StdDev  (1,fp_B_mV,IEEE4,False)
+   Average (1,fp_B_Wm2,IEEE4,False)
+   StdDev  (1,fp_B_Wm2,IEEE4,False) 
+   
+   ' Licor
+   Average (1,licor_co2,IEEE4,False)
+   StdDev  (1,licor_co2,IEEE4,False)
+   Average (1,licor_h2o,IEEE4,False)
+   StdDev  (1,licor_h2o,IEEE4,False) 
+   Average (1,licor_t,FP2,False)
+   StdDev  (1,licor_t,FP2,False)       
+   Average (1,licor_co2_str_out,IEEE4,False)
+   StdDev  (1,licor_co2_str_out,IEEE4,False)     
+
+   ' Fantachs
+   Average (1,sr30_swu_fantach,FP2,False)
+   Average (1,sr30_swu_heatA,FP2,False)
+   Average (1,sr30_swd_fantach,FP2,False)
+   Average (1,sr30_swd_heatA,FP2,False) 
+   Average (1,ir20_lwu_fan,FP2,False) 
+   Average (1,ir20_lwd_fan,FP2,False) 
+ 
+   '  Efoy  
+   Maximum(1,efoy_Error,UINT2,False,False)
+   Average(1,efoy_FuellSt,FP2,False)   
+   Average(1,efoy_Ubat,FP2,False)
+   Average(1,efoy_Laus,FP2,False)
+   Average(1,efoy_Tst,FP2,False)
+   Average(1,efoy_Tint,FP2,False)
+   Average(1,efoy_Twt,FP2,False)  
+         
+EndTable
+
+
+' table2 is defined at the top. It is the summary data file
+' this store the 2 most recent 10 min averages of the varibles, then overwrites
+' if iridium is used, sumStr will be assembled from the last write to the
+'   data table and sent via iridium every 10 min until the radios return
+DataTable (sumfile,true,36)
+ 
+   DataInterval (0,sumfile_avg,Min,10)
+                                                        '1.  Time stamp (10 char)  YYMMDDhhmm
+    Average (1,gps_lat_deg,UINT2,False)                     '2.  Lat (decimal degrees *10000, 6 char):  856573 >> 85.6573 degN
+    Average (1,gps_lat_min,IEEE4,False)                     '2.  Lat (decimal degrees *10000, 6 char):  856573 >> 85.6573 degN
+    Average (1,gps_lon_deg,UINT2,False)
+    Average (1,gps_lon_min,IEEE4,False)                     '3.  Lon (decimal degrees *10000, 7 char):  1206573 >>  120.6573 degE
+    Average (1,gps_hdg,FP2,False)                     '4.  Heading (decimal degrees *100, 5 char): 33725 >> 337.25 de        
+    Average (1,gps_alt,FP2,False)                     '5.  Alt (decimal meters *1000, 4 char): 2341 >> 2.341 m
+    Average (1,metek_InclX,FP2,False)        '6.  Pitch sonic (deg *100, 5 char): -1127 >> -11.27 deg                     
+    Average (1,metek_InclY,FP2,False)        '7.  Roll  sonic (deg *100, 5 char): -1127 >> -11.27 deg
+    Average (1,PTemp,FP2,False)                  '8.  CR1000X Panel Temp (~ Box internal temp) in C * 10
+    Totalize (1,counts_main,UINT2,False)	              '9.  number of samples in 1 min avg. Exp 120 if 5 sec scan and 10 min mean
+    Average (1,vaisala_P,FP2,False)              '10. P (mb * 10, 5 char x 2):  10137 >> 1013.7 mb
+    Average (1,vaisala_T,FP2,False)              '11. T (k *10, 4 char x 2):  2633 >>  263.3 k
+    Average (1,vaisala_RH,FP2,False)             '12. RH (% *10, 3 char x 2):  955 >> 95.5%
+    Average (1,apogee_targ_T,FP2,False)          '13. IRT (k *10, 4 char x 2):  2633 >> 263.3 k
+    Average (1,sr50_dist,FP2,False)             '14. Zsfc (m*100, 3 char x 2): 234 >> 2.34 m
+    Average (1,ir20_lwu_Wm2,FP2,False)                '15. LWU (W/m2 *10, 4 char x 2):  2503 >> 250.3 W/m2
+    Average (1,ir20_lwd_Wm2,FP2,False)                '16. LWD (W/m2 *10, 4 char x 2):  2503 >> 250.3 W/m2
+    Average (1,sr30_swd_Irr,FP2,False)                '17. SWU (W/m2 *10, 4 char x 2):  2503 >> 250.3 W/m2
+    Average (1,sr30_swu_Irr,FP2,False)                '18. SWD (W/m2 *10, 4 char x 2):  2503 >> 250.3 W/m2
+    Average (1,fp_A_Wm2,FP2,False)                    '19. Fsfc1 (W/m2 *10, 5 char x 2): -1077 >> -107.7 W/m2
+    Average (1,fp_B_Wm2,FP2,False)                    '20. Fsfc2 (W/m2 *10, 5 char x 2): -1077 >> -107.7 W/m2         
+    Average (1,metek_x,FP2,False)               '21. X winds sonic (m/s *10, 4 char x 2): -127 >> -12.7 m/s
+    Average (1,metek_y,FP2,False)               '22. Y winds sonic (m/s *10, 4 char x 2): -127 >> -12.7 m/s
+    Average (1,metek_z,FP2,False)              '23. Z winds sonic  (m/s *100, 4 char x 2): -127 >> -1.27 m/s
+    Sample  (1, metek_heatstatus_out,UINT2,False)       '25: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
+    Sample  (1, metek_senspathstate_out,UINT2,False)    '26: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
+    Sample  (1, metek_allpathstate_out,UINT2,False)     '27: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
+    Average (1,sr30_swu_fantach,UINT2,False)            '28: SR30 fantach in Hz
+    Average (1,sr30_swu_heatA,UINT2,False)              '29: SR30 fantach in Hz
+    Average (1,sr30_swd_fantach,UINT2,False)            '30: SR30 heat amperage in mV 
+    Average (1,sr30_swd_heatA,UINT2,False)              '31: SR30 heat amperage in mV 
+    Average (1,ir20_lwu_fan,UINT2,False)                '32: IR20 LWU VU01 fan status
+    Average (1,ir20_lwd_fan,UINT2,False)                '33: IR20 LWD VU01 fan status
+    Sample  (1,efoy_Error,UINT2,False)                   '34: Efoy error code
+    Average (1,efoy_FuellSt,FP2,False)                '36: calculated fuel remaining in %
+    Average (1,efoy_Ubat,FP2,False)                   '37: output battery voltage in V
+    Average (1,efoy_Laus,FP2,False)                   '38: output current in A
+    Average (1,efoy_Tint,FP2,False)                   '40: efoy internal temperature in C
+    
+EndTable  
+
+' table1 is defined at the top. It is the Licor/Metek output. 
+' Saved to SD-card at in crdfile_freq (nominally 1-hr) blocks
+' 36000 limits this table to 0.5 hours
+DataTable (table3,true,36001)
+
+    TableFile ("CRD:"+table3,13,-1,0,crdfile_freq,Min,OutStatF,LastFileNameF)
+     
+      Sample(1,metek_x_out,IEEE4)
+      Sample(1,metek_y_out,IEEE4)
+      Sample(1,metek_z_out,IEEE4)
+      Sample(1,metek_T_out,IEEE4)                        
+      Sample(1,metek_diag_out,UINT2)
+      Sample(1,licor_co2_out,IEEE4)
+      Sample(1,licor_h2o_out,IEEE4)
+      Sample(1,licor_pr_out,IEEE4)
+      Sample(1,licor_diag_out,UINT2)
+      
+EndTable
+
+' table4 is deinfed at the top. It is 5s Vaisala p/t/q output
+' Saved to SD-card at in crdfile_freq (nominally 1-hr) blocks
+' 51840
+DataTable(table4,true,-1)
+  
+  DataInterval (0,0,Sec,10)
+   
+    TableFile ("CRD:"+table4,13,-1,0,crdfile_freq,Min,OutStatV,LastFileNameV)
+    
+      Sample (1,gps_lat_deg,FP2)
+      Sample (1,gps_lat_min,IEEE8) 
+      Sample (1,gps_lon_deg,FP2)                    
+      Sample (1,gps_lon_min,IEEE8)                
+      Sample (1,gps_hdg,IEEE4)                   
+      Sample (1,gps_alt,IEEE4) 
+      Sample (1,gps_nsat,UINT2)  
+      Sample (1,gps_hdop,FP2)                 
+      Sample (1,call_time_modbus_vaisala,UINT2)
+      Sample (1,vaisala_P,IEEE4)
+      Sample (1,vaisala_T,FP2) 
+      Sample (1,vaisala_RH,FP2) 
+
+EndTable
+
+' This is for remote restarts
+' To manually reboot the logger, connect to the logger, go to the restarts DataTable 
+' and right-click on the "false" under ApplyAndRestart, View/Modify value and change
+' false to true.
+ConstTable (restarts)
+
+    Const restartstable = -1 
+
+EndConstTable
+
+' =============================================================================
+
+
+' =============================================================================
+'Main Program
+
+BeginProg
+
+    ' TCPOpen opens the ethernet port for reading, IP = sonic's IP, hahyndle is the port handle             
+    metek_socket = TCPOpen (metekIP,metekPort,15001,100,HandleM,1) ' METEK: network
+    licor_socket = TCPOpen (licorIP,licorPort,9001,100,HandleL,1)  ' LICOR: network        
+    
+    ' Be and NTP server
+    ntp_server = NetworkTimeProtocol("", -1, 0)  
+
+    ' Main Scan. --------------------------------------------------------------
+    ' 5s, calls all tables
+    Scan (scan_freq,Sec,0,0)
+      
+        ' Starting a timer to monitor time to different sections of the program
+        Timer(1,mSec,2)
+          
+        ' ************************* Open serial ports ***************************
+        ' This open is placed inside the scan loop so that the comport can be reopened automatically if closes for some unexpected reason 
+        
+        ' GPS: ComC7 (C7/C8) is the RS232 port for GPS             
+        SerialOpen (ComC7,19200,0,0,100,0)
+        
+        ' Iridium Link
+        SerialOpen(ComRS232,19200,0,0,2000)
+        
+        ' This is a continuous storage of metek and licor data in a ring buffer of size = lasst argument in bytes   
+        metek_tcp_result = SerialInBlock (HandleM,RawStringM,12001)
+        licor_tcp_result = SerialInBlock (HandleL,RawStringL,5001)
+        
+        ' If for some reason the metek or licor reboot the network line is interupted, we need to restart the
+        ' the connection or else the logger won't receive the data anymore
+        If metek_tcp_result = 0 Then
+          TCPClose (metek_socket)
+          metek_socket = TCPOpen (metekIP,metekPort,15001,100,HandleM,1) 
+        EndIf
+        
+        ' ***********************************************************************
+    
+    	  ' Logger ...
+    		PanelTemp (PTemp,50)
+    		Battery (batt_volt)
+    		
+        ' ************************ IRIDIUM/RADIO MGMT **************************
+        '
+        ' Cox added options to PortSet to allow program to compile in Pipeline
+        '
+       
+        'Ping Master modem ip 
+        PingMe=PingIP(shipradioIP,500)
+    		
+        '  Do
+        ' If pings to ship fail
+        If PingMe = 0 Then 
+                     
+          ' at the top of every 6 hours (sumfile_freq nominally = 360 min, see settings at top) turn on the modem
+          If TimeIsBetween(irid_offset,irid_offset+10,sumfile_freq,Min)
+            PortSet(C2,1,1)
+            Flag(1)=True
+          Else
+            PortSet(C2,0,1)
+            Flag(1)=False
+          EndIf
+          
+          ' then at 6 hours + irid_offset configure the modem
+          If IfTime(irid_offset+1,sumfile_freq,Min) Then 
+            Configure_Modem = True
+          EndIf
+          
+          If Configure_Modem = True Then
+                      
+            'Send the settings to iridium modem
+            If Flag(1)= True Then
+              SetupStr = "AT&F0 S0=1 &D0 +IPR=6,0 V1 &K0 &W0 &Y0" & CHR(13) & CHR(10)
+              SerialOut(ComRS232, SetupStr, "",0,0)
+              Configure_Modem = false
+              Flag(1)=False
+            EndIf
+            
+          EndIf
+    
+          'Once settings are sent to the modem allow 2 minutes before sending the modem
+          'registration command to the modem
+          If IfTime (irid_offset+3,sumfile_freq,Min) Then 
+            Call_Modem = True
+          EndIf 
+          
+          If Flag(1)= True Then
+            If Call_Modem = True Then
+              
+              'Send ATDT dialing command from 9522B to force modem registration on Iridium network
+              Register_Modem = "ATDT1234" & CHR(13) & CHR(10)
+              SerialOut(ComRS232, Register_Modem,"",0,0)
+              Call_Modem = false
+              Flag(1)=False
+              
+            EndIf
+          EndIf
+          
+          If IfTime (irid_offset+4,sumfile_freq,Min) Then 
+              ' Send the last 36 10 min avg summary data (past 6 hours)
+              'SendData (ComRS232,0,4094,sumfile,36)
+              SendVariables(callback_result, ComRS232,4094, 4094, 0000, 2500,"Public","Callback",dummy,1)
+          EndIf              
+
+        EndIf
+        ' *********************************************************************
+
+
+        ' ******************************* GPS *********************************
+                
+        ' GPS is set to 1000 ms so the GPS command will not allow the logger
+        ' clock to be off by more than 1 second. We will likely keep time more
+        ' accurately than this from the ship so this clock set should only occur
+        ' if there is a problem we are not synching from the ship
+        
+        GPS (GPS_Data(),-ComC7,0,499,NMEAStrings)
+        gps_lat_deg = GPS_Data(1)
+        gps_lat_min = GPS_Data(2)
+        gps_lon_deg = GPS_Data(3)
+        gps_lon_min = GPS_Data(4)
+        gps_alt  = GPS_Data(10) 
+        gps_hdg  = GPS_Data(18)  
+        gps_qc   = GPS_Data(8)  
+        gps_nsat = GPS_Data(9)
+        
+        ' Extract HDOP from GPGGA
+        SplitStr (GGAparse,NMEAStrings(2),",",15,5)
+        gps_hdop = GGAparse(9)
+   
+        ' -- This is the complete output. Not using all of it. --
+        ' GPS_Data(1) 'Degrees latitude (+ = North; - = South) [deg]
+        ' GPS_Data(2) 'Minutes latitude [min]
+        ' GPS_Data(3) 'Degress longitude (+ = East; - = West) [deg]
+        ' GPS_Data(4) 'Minutes longitude [min]
+        ' GPS_Data(5) 'Speed [m/s]
+        ' GPS_Data(6) 'Course over ground [deg]
+        ' GPS_Data(7) 'Magnetic variation from true north (+ = East; - = West) [unitless]
+        ' GPS_Data(8) 'GPS fix quality: 0 = invalid, 1 = GPS, 2 = differential GPS, 6 = estimated [unitless]
+        ' GPS_Data(9) 'Number of satellites used for fix [unitless]
+        ' GPS_Data(10) 'Antenna altitude [m]
+        ' GPS_Data(11) 'usec into sec of system clock when PPS rising edge occurs, typically 990,000 once synced [ms]
+        ' GPS_Data(12) 'Time since last GPRMC string, normally less than 1 second [s]
+        ' GPS_Data(13) 'Counts from 0 to 10, 10 = ready [unitless]
+        ' GPS_Data(14) 'Maximum value the clock was changed in msec [ms]
+        ' GPS_Data(15) 'Number of times the clock was changed [samples]
+        ' GPS_Data(16) 'Possibly end of transmission character, CHR(4)
+        ' GPS_Data(17) 'Unknown
+        ' GPS_Data(18) 'Heading [deg]
+        ' GPS_Data(19) 'Heading reference character, CHR(84) = T = true heading
+        ' GPS_Data(20) 'Unknown, possibly null character
+        ' GPS_Data(21) 'Unknown
+        ' GPS_Data(22) 'Time [hhmmss]
+        ' GPS_Data(23) 'Day of month [dd]
+        ' GPS_Data(24) 'Month [mo]
+        ' GPS_Data(25) 'Year [yyyy]    
+         
+        ' *********************************************************************
+    		
+
+        ' This is just a counter growing an array of ones that will  =
+        ' # of scans per minute (when data table is initiated) 
+		    counts_main = 1     
+
+        ' ***************************** METEK ********************************* 
+        ' Read all 100 values from the last second as they come in, stored in serial buffer
+        ' Then split the string into 100 lines, calling the data table 100 times
+        ' Allowing 101 msgs to be in the buffer to prevent strings from being cut off                
+          If Len(RawStringM) > 1
+            SplitStr (SplitStringsM(),RawStringM,CHR(02),101,4) ' split message by <STX> (CHR(02)) frame
+            For k = 1 To 100
+              metekstr = SplitStringsM(k)
+              SplitStr (metekstr,metekstr,CHR(03),1,5) ' remove the ETX character
+              metekstr = Mid (metekstr,10,Len(metekstr)) ' chop off the first 10 characters, which report the config settings
+              metekstr = Replace (metekstr,CHR(13),CHR(0)) ' remove CR 
+              If metekstr <> CHR(0) Then ' if the message is not empty
+                SplitStr (SplitStringsM2(),metekstr,CHR(44),12,5)' parse into 12 pieces using comma delimiter
+                metek_heatstatus(k) = Mid (SplitStringsM2(1),1,1) 
+                metek_senspathstate(k) = Mid (SplitStringsM2(1),2,1) 
+                metek_allpathstate(k) = Mid (SplitStringsM2(1),3,4) 
+                metek_x(k) = SplitStringsM2(2)
+                metek_y(k) = SplitStringsM2(3)
+                metek_z(k) = SplitStringsM2(4)
+                metek_T(k) = SplitStringsM2(5)
+                metek_InclX(k) = SplitStringsM2(10)
+                metek_InclY(k) = SplitStringsM2(11)
+              EndIf           
+            Next k
+          EndIf
+ 
+        ' ***************************** LICOR ********************************* 
+        ' Read all 20 values from the last second as they come in, stored in serial buffer
+        ' Then split the string into 20 lines, calling the data table 20 times         
+          If Len(RawStringL) > 1
+            SplitStr (SplitStringsL(),RawStringL,CHR(10),101,5) ' split strings by LF (CHR10)
+
+            ' for each string
+            For k = 1 To 100
+              ' collect the msg and trim some of the extra. some of this can be removed when ASFS_licor call table is removed
+              licorstr = SplitStringsL(k)
+              licorstr = Replace (licorstr,CHR(10),"") ' remove the line feed
+              licorstr = Replace (licorstr,CHR(09),",") ' replace all tabs with commas
+              licorstr = Replace (licorstr,CHR(32),",") ' replace all space with commas
+              
+              ' extract the variables 
+              SplitStr (SplitStringsL2(),licorstr,",",6,5)
+              licor_diag(k) = SplitStringsL2(1)
+              licor_co2(k) = SplitStringsL2(2)
+              licor_h2o(k) = SplitStringsL2(3)
+              licor_co2_str(k) = SplitStringsL2(6)
+              licor_t(k) = SplitStringsL2(4)
+              licor_pr(k) = SplitStringsL2(5)                          
+            Next k
+          EndIf 
+
+          ' Write to the Table
+          For k = 1 To 100
+              metek_x_out = metek_x(k)
+              metek_y_out = metek_y(k)
+              metek_z_out = metek_z(k)
+              metek_T_out = metek_T(k)
+              metek_InclX_out = metek_InclX(k)
+              metek_InclY_out = metek_InclY(k)
+              metek_diag_out = metek_heatstatus(k) & metek_senspathstate(k)
+              metek_heatstatus_out = metek_heatstatus(k)
+              metek_senspathstate_out = metek_senspathstate(k)
+              metek_allpathstate_out = metek_allpathstate(k)
+              licor_diag_out = licor_diag(k)
+              licor_co2_out = licor_co2(k)
+              licor_h2o_out = licor_h2o(k)
+              licor_co2_str_out = licor_co2_str(k) 
+              licor_pr_out = licor_pr(k)
+              licor_t_out = licor_t(k)
+              CallTable table3 
+          Next k
+          
+        ' *********************************************************************
+
+
+
+        ' ************************* ANALOG DATA *******************************
+         
+        ' Hukseflux IR20 LWU
+        VoltDiff (ir20_lwu_mV,1,AutoRange,1,True ,0,50,1.0,0)
+        BrHalf (ir20_lwu_Case_R,1,AutoRange,5,Vx1,1,250,True ,0,50,1,0)
+        ir20_lwu_Case_R   = RefR * (ir20_lwu_Case_R / (1 - ir20_lwu_Case_R))
+        ir20_lwu_DegC     = 1/(0.0010295 + 0.0002391 * LN(ir20_lwu_Case_R) + 0.0000001568 * LN(ir20_lwu_Case_R)^3) - K0
+        ir20_lwu_Wm2        = (ir20_lwu_mV / ir20_lwu_s) + stefboltz * (ir20_lwu_DegC+K0)^4
+        VoltSe (ir20_lwu_fan,1,mv5000,7,True ,0,50,1.0,0)
+       
+        ' Hukseflux IR20 LWD
+        VoltDiff (ir20_lwd_mV,1,AutoRange,2,True ,0,50,1.0,0)
+        BrHalf (ir20_lwd_Case_R,1,AutoRange,6,Vx2,1,250,True ,0,50,1,0)
+        ir20_lwd_Case_R   = RefR * (ir20_lwd_Case_R / (1 - ir20_lwd_Case_R))
+        ir20_lwd_DegC     = 1/(0.0010295 + 0.0002391 * LN(ir20_lwd_Case_R) + 0.0000001568 * LN(ir20_lwd_Case_R)^3) - K0
+        ir20_lwd_Wm2        = (ir20_lwd_mV / ir20_lwd_s) + stefboltz * (ir20_lwd_DegC+K0)^4
+        VoltSe (ir20_lwd_fan,1,mv5000,8,True ,0,50,1.0,0)        
+
+       ' Flux Plate A
+        VoltDiff (fp_A_mV,1,AutoRange,6,True ,0,50,1.0,0)
+        fp_A_Wm2 = fp_A_mV / fp_A_s
+    
+       ' Flux Plate B
+        VoltDiff (fp_B_mV,1,AutoRange,5,True ,0,50,1.0,0)
+        fp_B_Wm2 = fp_B_mV / fp_B_s
+        
+        ' *********************************************************************
+
+
+        ' ***************************** MODBUS ********************************  
+        
+        ' ComC5 (C5/C6) is the RS485 port - the reads toggle between 9600 and 19200   
+        SerialOpen (ComC5,19200,2,0,100,4)     
+        
+        ' SR30 SWU
+        ' There are 3 modbus calls here because we do not have access to reguisters 198, 40s
+        ' We can get away with negating the wait argument, which will prevent delays if the instrument goes down
+        ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,3,5,2,15,3)
+        sr30_swu_DegC = sr30_swu_data(5) / 100
+        sr30_swu_IrrC = ( sr30_swu_data(1)*2^16 + sr30_swu_data(2) ) / 100
+        sr30_swu_Irr  = ( sr30_swu_data(3)*2^16 + sr30_swu_data(4) ) / 100
+        ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,195,3,1,15,3)
+        sr30_swu_tilt   = sr30_swu_data(1) / 100 
+        sr30_swu_fantach = sr30_swu_data(3) / 60 'Hz        
+        ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,199,1,1,15,3)
+        sr30_swu_heatA   = sr30_swu_data(1) 'mA   
+        call_time_modbus_sr301 = Timer (1,mSec,4) 
+             
+        ' SR30 SWD
+        ' There are 3 modbus calls here because we do not have access to reguisters 198, 40s
+        ' We can get away with negating the wait argument, which will prevent delays if the instrument goes down
+        ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,3,5,2,15,3)
+        sr30_swd_DegC = sr30_swd_data(5) / 100
+        sr30_swd_IrrC = ( sr30_swd_data(1)*2^16 + sr30_swd_data(2) ) / 100
+        sr30_swd_Irr  = ( sr30_swd_data(3)*2^16 + sr30_swd_data(4) ) / 100
+        ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,195,3,1,15,3)
+        sr30_swd_tilt   = sr30_swd_data(1) / 100 
+        sr30_swd_fantach = sr30_swd_data(3) / 60 'Hz        
+        ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,199,1,1,15,3)
+        sr30_swd_heatA   = sr30_swd_data(1) 'mA   
+        call_time_modbus_sr302 = Timer (1,mSec,4) 
+        
+        ' Vaisala
+        ' There are two separate calls because we do not have access to mid-range register
+        ModbusMaster (vaisala_val,ComC5,19200,3,3,vaisala_data,1,44,2,15,3)
+        vaisala_RH_Long = vaisala_data(2)*2^16 + vaisala_data(1)   
+        MoveBytes (vaisala_RH,0,vaisala_RH_Long,0,4)    
+        vaisala_T_Long = vaisala_data(4)*2^16 + vaisala_data(3)   
+        MoveBytes (vaisala_T,0,vaisala_T_Long,0,4)         
+        vaisala_Td_Long = vaisala_data(8)*2^16 + vaisala_data(7)   
+        MoveBytes (vaisala_Td,0,vaisala_Td_Long,0,4)      
+        vaisala_P_Long = vaisala_data(44)*2^16 + vaisala_data(43)   
+        MoveBytes (vaisala_P,0,vaisala_P_Long,0,4)     
+        call_time_modbus_vaisala = Timer (1,mSec,4) 
+        SerialClose (ComC5)
+
+        SerialOpen (ComC5,9600,2,0,100,4) 
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT32,30002,5,2,15,2)
+        efoy_Tst = efoy_dataINT32(1) * 0.001
+        efoy_Tint = efoy_dataINT32(3) * 0.001
+        efoy_Twt = efoy_dataINT32(5) * 0.001
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16,30016,1,2,15,3)
+        efoy_Ubat = efoy_dataUINT16(1) * 0.001
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT16,30029,1,2,15,1)
+        efoy_Laus = efoy_dataINT16 * 0.001  
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16,30036,3,2,15,3)
+        efoy_FuellSt = efoy_dataUINT16(1) * 0.01
+        efoy_Error = efoy_dataUINT16(3)
+        call_time_efoy = Timer (1,mSec,4) 
+        SerialClose (ComC5)
+        
+        ' *********************************************************************  
+      
+
+        ' ***************************** SD-12 *********************************
+            
+        ' SR50
+        SDI12Recorder(sr50data,C1,1,"M1!",1.0,0)
+        sr50_dist = sr50data(1)
+        sr50_qc = sr50data(2)
+        call_time_sdi1 = Timer (1,mSec,4) 
+        
+        ' Apogee SI-4H1-SS 3287
+        SDI12Recorder(apogee,C3,2,"M1!",1.0,0)
+        apogee_body_T = apogee(1)
+        apogee_targ_T = apogee(2)
+        call_time_sdi2 = Timer (1,mSec,4) 
+        
+        ' *********************************************************************
+
+        call_time_mainscan = Timer (1,mSec,4) 
+        
+        ' Data Table
+        CallTable table1
+        CallTable table2
+        CallTable table4
+        
+  NextScan
+     
+EndProg
+
+' =============================================================================
