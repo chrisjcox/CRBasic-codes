@@ -1,4 +1,4 @@
-Public PgmVersion As String = "IGB_H_002_v112"
+Public PgmVersion As String = "IGB_H_002_v113"
 '
 ' Artic Mobile Observing System (AMOS)
 ' 2021 Surface Energy Budget "MET" program
@@ -16,6 +16,7 @@ Public PgmVersion As String = "IGB_H_002_v112"
 '   11/23/2021; v 110. set spc on time to be 1700-1730 to match certus lan. metek heater mode to auto function. tried to give IMU oritentation based on Anthony's report
 '   12/23/21: v111. trying to fix vaisala_T problem
 '   12/28/21: vn3000 default off bc antenna failures. spc on beg 1650.
+'   12/31/21: fix temp issue
 
 ' -----------------------------------------------------------------------------
 '     Manuf.     Model        SN          Function    Ch             Note
@@ -237,7 +238,7 @@ Public vaisala_data(44) As Long
 Public vaisala_val
 Public vaisala_RH_Long As Long
 Public vaisala_RH As Float
-Public vaisala_T_Long As Long
+Public vaisala_T_Long As Long  
 Public vaisala_T As Float
 Public vaisala_P_Long As Long
 Public vaisala_P As Float
@@ -580,7 +581,11 @@ BeginProg
         EndIf                 
         
         ' SPC schedule
-        If Hour = 16 AND Minute > 50 OR Hour = 17 AND Minute < 30 Then
+        If Hour = 17 AND Minute < 30 Then
+          spc_override = 1
+          light_switch_go(16) = 1
+        EndIf
+        If Hour = 16 AND Minute > 50 Then
           spc_override = 1
           light_switch_go(16) = 1
         EndIf
@@ -782,8 +787,8 @@ BeginProg
         ModbusMaster (vaisala_val,modbus_port,modbus_baud,vaisala_addr,3,vaisala_data,1,44,2,15,3)
         vaisala_RH_Long = vaisala_data(2)*2^16 + vaisala_data(1)   
         MoveBytes (vaisala_RH,0,vaisala_RH_Long,0,4)
-        vaisala_T_Long = vaisala_data(4)*2^16 + vaisala_data(3)
-        MoveBytes (vaisala_T,0,vaisala_T_Long,0,4)         
+        vaisala_T_Long = ((vaisala_data(4)-65536)*2^16) + vaisala_data(3)
+        MoveBytes (vaisala_T,0,vaisala_T_Long,0,4)  
         vaisala_P_Long = vaisala_data(44)*2^16 + vaisala_data(43)   
         MoveBytes (vaisala_P,0,vaisala_P_Long,0,4)        
           
