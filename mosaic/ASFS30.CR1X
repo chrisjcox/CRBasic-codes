@@ -1,7 +1,7 @@
-Public PgmVersion As String = "ASFS30_505"
+Public PgmVersion As String = "ASFS30_506"
 '
 ' Autonomous Surface Flux System (ASFS) - MOSAiC
-' ASFS 1
+' ASFS 30
 '
 ' CR1000X 3768
 ' Cal. May 2018
@@ -67,8 +67,8 @@ Const irid_offset  As Long = 0                ' The value is unique for each ASF
 
 
 ' Set Cals
-Const fp_A_s = 61.31/1000 ' 5636 Sensitivity [mV/(W/m2)]
-Const fp_B_s = 63.52/1000 ' 5637 Sensitivity [mV/(W/m2)]
+Const fp_A_s = 61.31/1000 ' 15614 Sensitivity [mV/(W/m2)]
+Const fp_B_s = 63.52/1000 ' 15618 Sensitivity [mV/(W/m2)]
 Const ir20_lwd_s = 12.15/1000 ' 4061 Sensitivity [mV/(W/m2)] 
 Const ir20_lwu_s = 12.48/1000 ' 4065 Sensitivity [mV/(W/m2)]
 
@@ -242,7 +242,6 @@ Public metekstr As String * 150
 Public SplitStringsM2(14) As String * 25
 Public metek_heatstatus(101)
 Public metek_senspathstate(101)
-Public metek_allpathstate(101)
 Public metek_x(101)
 Public metek_y(101)
 Public metek_z(101)
@@ -274,7 +273,6 @@ Public licor_t(101)
 ' These varibles will be written to the file, extracted from licor/metek above
 Public metek_heatstatus_out
 Public metek_senspathstate_out
-Public metek_allpathstate_out
 Public metek_diag_out As String * 5
 Public metek_x_out
 Public metek_y_out 
@@ -290,8 +288,6 @@ Public licor_pr_out
 Public licor_t_out
 Units metek_heatstatus_out = code
 Units metek_senspathstate_out = N
-Units metek_allpathstate_out = %
-Units metek_diag_out = N
 Units metek_x_out = mm/s
 Units metek_y_out = mm/s
 Units metek_z_out = mm/s
@@ -513,7 +509,6 @@ DataTable (sumfile,true,36)
     Average (1,metek_z,FP2,False)              '23. Z winds sonic  (m/s *100, 4 char x 2): -127 >> -1.27 m/s
     Sample  (1, metek_heatstatus_out,UINT2,False)       '25: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
     Sample  (1, metek_senspathstate_out,UINT2,False)    '26: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
-    Sample  (1, metek_allpathstate_out,UINT2,False)     '27: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
     Average (1,sr30_swu_fantach,UINT2,False)            '28: SR30 fantach in Hz
     Average (1,sr30_swu_heatA,UINT2,False)              '29: SR30 fantach in Hz
     Average (1,sr30_swd_fantach,UINT2,False)            '30: SR30 heat amperage in mV 
@@ -539,7 +534,8 @@ DataTable (table3,true,36001)
       Sample(1,metek_y_out,IEEE4)
       Sample(1,metek_z_out,IEEE4)
       Sample(1,metek_T_out,IEEE4)                        
-      Sample(1,metek_diag_out,UINT2)
+      Sample(1,metek_heatstatus_out,UINT2)                    
+      Sample(1,metek_senspathstate_out,UINT2)
       Sample(1,licor_co2_out,IEEE4)
       Sample(1,licor_h2o_out,IEEE4)
       Sample(1,licor_pr_out,IEEE4)
@@ -765,7 +761,6 @@ BeginProg
                 SplitStr (SplitStringsM2(),metekstr,CHR(44),12,5)' parse into 12 pieces using comma delimiter
                 metek_heatstatus(k) = Mid (SplitStringsM2(1),1,1) 
                 metek_senspathstate(k) = Mid (SplitStringsM2(1),2,1) 
-                metek_allpathstate(k) = Mid (SplitStringsM2(1),3,4) 
                 metek_x(k) = SplitStringsM2(2)
                 metek_y(k) = SplitStringsM2(3)
                 metek_z(k) = SplitStringsM2(4)
@@ -809,10 +804,8 @@ BeginProg
               metek_T_out = metek_T(k)
               metek_InclX_out = metek_InclX(k)
               metek_InclY_out = metek_InclY(k)
-              metek_diag_out = metek_heatstatus(k) & metek_senspathstate(k)
               metek_heatstatus_out = metek_heatstatus(k)
               metek_senspathstate_out = metek_senspathstate(k)
-              metek_allpathstate_out = metek_allpathstate(k)
               licor_diag_out = licor_diag(k)
               licor_co2_out = licor_co2(k)
               licor_h2o_out = licor_h2o(k)
@@ -845,11 +838,11 @@ BeginProg
         VoltSe (ir20_lwd_fan,1,mv5000,8,True ,0,50,1.0,0)        
 
        ' Flux Plate A
-        VoltDiff (fp_A_mV,1,AutoRange,6,True ,0,50,1.0,0)
+        VoltDiff (fp_A_mV,1,AutoRange,5,True ,0,50,1.0,0)
         fp_A_Wm2 = fp_A_mV / fp_A_s
     
        ' Flux Plate B
-        VoltDiff (fp_B_mV,1,AutoRange,5,True ,0,50,1.0,0)
+        VoltDiff (fp_B_mV,1,AutoRange,6,True ,0,50,1.0,0)
         fp_B_Wm2 = fp_B_mV / fp_B_s
         
         ' *********************************************************************
@@ -863,10 +856,11 @@ BeginProg
         ' SR30 SWU
         ' There are 3 modbus calls here because we do not have access to reguisters 198, 40s
         ' We can get away with negating the wait argument, which will prevent delays if the instrument goes down
-        ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,3,5,2,15,3)
-        sr30_swu_DegC = sr30_swu_data(5) / 100
+        ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,3,5,2,15,3
         sr30_swu_IrrC = ( sr30_swu_data(1)*2^16 + sr30_swu_data(2) ) / 100
         sr30_swu_Irr  = ( sr30_swu_data(3)*2^16 + sr30_swu_data(4) ) / 100
+        ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,7,1,2,15,1)
+        sr30_swu_DegC = sr30_swu_data(1) / 100
         ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,195,3,1,15,3)
         sr30_swu_tilt   = sr30_swu_data(1) / 100 
         sr30_swu_fantach = sr30_swu_data(3) / 60 'Hz        
@@ -878,15 +872,16 @@ BeginProg
         ' There are 3 modbus calls here because we do not have access to reguisters 198, 40s
         ' We can get away with negating the wait argument, which will prevent delays if the instrument goes down
         ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,3,5,2,15,3)
-        sr30_swd_DegC = sr30_swd_data(5) / 100
         sr30_swd_IrrC = ( sr30_swd_data(1)*2^16 + sr30_swd_data(2) ) / 100
         sr30_swd_Irr  = ( sr30_swd_data(3)*2^16 + sr30_swd_data(4) ) / 100
+        ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,7,1,2,15,1)
+        sr30_swd_DegC = sr30_swd_data / 100
         ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,195,3,1,15,3)
         sr30_swd_tilt   = sr30_swd_data(1) / 100 
         sr30_swd_fantach = sr30_swd_data(3) / 60 'Hz        
         ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,199,1,1,15,3)
         sr30_swd_heatA   = sr30_swd_data(1) 'mA   
-        call_time_modbus_sr302 = Timer (1,mSec,4) 
+        call_time_modbus_sr302 = Timer (1,mSec,4)  
         
         ' Vaisala
         ' There are two separate calls because we do not have access to mid-range register
