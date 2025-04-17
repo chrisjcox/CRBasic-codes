@@ -1,4 +1,4 @@
-Public PgmVersion As String = "IGB_H_002_v109"
+Public PgmVersion As String = "IGB_H_002_v111"
 '
 ' Artic Mobile Observing System (AMOS)
 ' 2021 Surface Energy Budget "MET" program
@@ -13,7 +13,9 @@ Public PgmVersion As String = "IGB_H_002_v109"
 ' Updates:
 '   beg. ASFS50_602_nolicor, 7/12/2019
 '   3/31/2020-5/11/2020, initial development thru v104 
-'
+'   11/23/2021; v 110. set spc on time to be 1700-1730 to match certus lan. metek heater mode to auto function. tried to give IMU oritentation based on Anthony's report
+'   12/23/21: v111. trying to fix vaisala_T problem
+
 ' -----------------------------------------------------------------------------
 '     Manuf.     Model        SN          Function    Ch             Note
 ' -----------------------------------------------------------------------------
@@ -109,28 +111,28 @@ Const Pi = 3.141593             ' Pi
 ConstTable (pwr_panel) 
     
   ' 12 VDC channels (16) and Flags            1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6
-  Const light_switch_sum_default As String = "1,1,1,1,1,1,0,0,1,1,1,1,1,1,0,0" ' MAMJJAS
-  Const light_switch_win_default As String = "1,1,0,0,1,1,0,0,1,1,0,0,0,0,0,0" ' DJF 
-  Const light_switch_override    As String = "x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x"
-  Const light_switch_mode        As String = "A" 
+  Const light_switch_sum_default As String = "1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,0" ' MAMJJAS
+  Const light_switch_win_default As String = "1,1,0,0,1,1,0,0,1,1,0,0,0,0,1,0" ' DJF 
+  Const light_switch_override    As String = "x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x" 
+  Const light_switch_mode        As String = "M" 
   
   ' Frame of Reference
   ' The buoy's frame of reference (FoR) will be defined as boom pointing "buoy north"
   '
   ' First, measurements in buoy FoR that moves vn300 centerpoint to position of antenna A
-  Const Meas1_x = -0.6  ' [m] vn300 position relative to antenna A along A-B (x); value is negative if vn300 is in the B direction of A
-  Const Meas1_y = 0.75  ' [m] vn300 offset perpenducular to A-B (y); value is negative if vn300 is to the right of A-B (when viewing along boom)
-  Const Meas1_z = -2.5  ' [m] vn300 offset along buoy's long axis (roughly up/down); value is negative if vn300 is closer to the water than A-B
+  Const Meas1_x = -0.3647 ' [m] vn300 position relative to antenna A along A-B (x); value is negative if vn300 is in the B direction of A
+  Const Meas1_y = -0.0241 ' [m] vn300 offset perpenducular to A-B (y); value is negative if vn300 is to the right of A-B (when viewing along boom)
+  Const Meas1_z = -0.7887 ' [m] vn300 offset along buoy's long axis (roughly up/down); value is negative if vn300 is closer to the water than A-B
   '
   ' Second, measurements is similar wit sign conventions reversed; distances of B relative to A in the buoy's FoR. 
   Const Meas2_x = 1.0922 ' [m] A should be closer to the buoy center, B farther long the boom. This value is the (positive) distance from A to B if B is farther out along the boom and A.
-  Const Meas2_y = 0      ' [m] If A and B are along the boom, this = 0
-  Const Meas2_z = 0      ' [m] If A and B are along the boom, this = 0
+  Const Meas2_y = 0 ' [m] If A and B are along the boom, this = 0
+  Const Meas2_z = 0 ' [m] If A and B are along the boom, this = 0
   '
   ' Third, are the yaw, pitch and roll angular offsets (in that order!) that would rotate vn300 into buoy FoR
-  Const Meas3_yaw = 90-18.4349 ' [deg] positive clockwise
-  Const Meas3_pit = 90-56.41   ' [deg] positive clockwise
-  Const Meas3_rol = 90         ' [deg] postive clockwise
+  Const Meas3_yaw = -71.5651 ' [deg] positive clockwise
+  Const Meas3_pit = 0 ' [deg] positive clockwise
+  Const Meas3_rol = 90 ' [deg] postive clockwise
   
 EndConstTable 
 
@@ -230,7 +232,7 @@ Units sr30_swd_heatA = mA
 Units sr30_swd_tilt = deg
 
 ' Vaisala
-Dim vaisala_data(44) As Long
+Public vaisala_data(44) As Long
 Public vaisala_val
 Public vaisala_RH_Long As Long
 Public vaisala_RH As Float
@@ -577,11 +579,11 @@ BeginProg
         EndIf                 
         
         ' SPC schedule
-        If Hour = 0 AND Minute < 30 Then
+        If Hour = 17 AND Minute < 30 Then
           spc_override = 1
           light_switch_go(16) = 1
         EndIf
-        If Hour = 0 AND Minute = 30 AND Second < 30 Then ' Send the signal to shut down
+        If Hour = 17 AND Minute = 30 AND Second < 30 Then ' Send the signal to shut down
           spc_countdown = 1
           spc_override = 0
         EndIf
@@ -778,8 +780,8 @@ BeginProg
         ' Vaisala
         ModbusMaster (vaisala_val,modbus_port,modbus_baud,vaisala_addr,3,vaisala_data,1,44,2,15,3)
         vaisala_RH_Long = vaisala_data(2)*2^16 + vaisala_data(1)   
-        MoveBytes (vaisala_RH,0,vaisala_RH_Long,0,4)    
-        vaisala_T_Long = vaisala_data(4)*2^16 + vaisala_data(3)   
+        MoveBytes (vaisala_RH,0,vaisala_RH_Long,0,4)
+        vaisala_T_Long = vaisala_data(4)*2^16 + vaisala_data(3)
         MoveBytes (vaisala_T,0,vaisala_T_Long,0,4)         
         vaisala_P_Long = vaisala_data(44)*2^16 + vaisala_data(43)   
         MoveBytes (vaisala_P,0,vaisala_P_Long,0,4)        
