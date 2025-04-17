@@ -6,6 +6,21 @@ The project was led by the Office of Naval Research (ONR) and the University of 
 The buoy and science package design are detailed in Webster et al. (2024). The CRBasic code here was used for data logging on Campbell Scientific CR1000X
 data loggers.
 
+Code features:
+- 10 sec scan cycle for slow sensors
+  - RS485 MODBUS sensor communication
+  - Analog measurements
+- 10 Hz passive buffer accumulation 
+  - RS422 sonic anemometer
+- 1 Hz subscan
+  - VN300 navigation
+-  vn300 reconfiguration on reboot
+-  anemometer icing detection and management of heater duty cycling
+-  coordination with an external linux board for soft shutdowns
+-  limited remote communcation capabilities for modbus sensor power management
+-  integration with SDM-CD16S DCDC controller for power managment, remotely controllable
+-  archived storage on local sd card
+-  paritioned internal storage, ftp enabled
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
