@@ -1,4 +1,4 @@
-Public PgmVersion As String = "ASFS30_SPLASH_805"
+Public PgmVersion As String = "ASFS30_SPLASH_806"
 '
 ' Autonomous Surface Flux System (ASFS) - MOSAiC
 ' ASFS 30
@@ -25,6 +25,7 @@ Public PgmVersion As String = "ASFS30_SPLASH_805"
 '   sum 2021  : for splash. some updates based on amos. testing
 '   9/29/2021 : splash deploy. reducing iridium load
 '   12/23/21: 2nd sum table for 10 min means of met data
+'   1/18/22: sum table to 30 min
 '
 ' -----------------------------------------------------------------------------
 '     Manuf.     Model        SN          Function    Ch             Note
@@ -66,7 +67,7 @@ Const asfsradioIP          = "192.168.202.33"    ' IP for this asfs station radi
 Const base_no              = "xxxxxxxxxxxxxx"    ' base station number for the spare iridium modem pair used in container beginning in may 2020
 Const scan_freq    As Long = 5  ' [sec]          ' the scan cycle
 Const sumfile_avg  As Long = 180 ' [min]          ' Summary file averaging period: 10 = 10 min averages
-Const sumfile2_avg  As Long = 10 ' [min]          ' Summary file averaging period: 10 = 10 min averages
+Const sumfile2_avg  As Long = 30 ' [min]          ' Summary file averaging period: 10 = 10 min averages
 Const sumfile_freq As Long = 1440 ' [min]          ' How often do you want to send summary files if on iridium?
 Const crdfile_freq As Long = 30 ' [min]          ' Frequency of new files containing 20 Hz data 
 Const crdsoil_freq As Long = 1  ' [day]          ' How often to write soil data to card
