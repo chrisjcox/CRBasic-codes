@@ -1,4 +1,4 @@
-Public PgmVersion As String = "ASFS40_506"
+Public PgmVersion As String = "ASFS40_507"
 '
 ' Autonomous Surface Flux System (ASFS) - MOSAiC
 ' ASFS 40
@@ -43,6 +43,8 @@ PipelineMode
 ' =============================================================================
 
 ' Set Parameteres
+ConstTable (EditableConstants)
+  
 Const stname       = "ASFS_40"          ' ASFS Station name
 Const table1       = "slow"           ' "1 min" avg data filename
 Const table2       = "sumfile"        ' "summary" (i.e, 6 hr of 10 min avg) filename
@@ -64,7 +66,8 @@ Const sumfile_freq As Long = 360 ' [min]      ' How often do you want to send su
 Const crdfile_freq As Long = 30 ' [min]       ' Frequency of new files containing 20 Hz data 
 Const datafile_avg As Long = 60 ' [sec]       ' Data file averaging time: 60 = 1 min averages
 Const irid_offset  As Long = 11               ' The value is unique for each ASFS. Iridium data will be sent at staggered intervals between the stations
-
+Const callback_on  As Long = 0                ' 1 = iridium callback on, 0 = off
+EndConstTable
 
 
 ' Set Cals
@@ -164,8 +167,11 @@ Units vaisala_Td = degC
 Units vaisala_P = hPa
 
 ' EFOY
-Public efoy_dataINT32(6) As Long
-Public efoy_dataUINT16(6) As Long
+Public efoy_dataINT32tst As Long
+Public efoy_dataINT32int As Long
+Public efoy_dataUINT16bat As Long
+Public efoy_dataUINT16f As Long
+Public efoy_dataUINT16e As Long
 Public efoy_dataINT16 As Long
 Public efoy_result
 Public efoy_Ubat As Float
@@ -173,14 +179,12 @@ Public efoy_FuellSt As Float
 Public efoy_Error As Long
 Public efoy_Tst As Float
 Public efoy_Tint As Float 
-Public efoy_Twt As Float
 Public efoy_Laus As Float
 Units efoy_Ubat = V
 Units efoy_FuellSt = %
 Units efoy_Error = N
 Units efoy_Tst = degC
 Units efoy_Tint = degC
-Units efoy_Twt = degC
 Units efoy_Laus = A
 
 ' SR50
@@ -273,7 +277,6 @@ Public licor_t(101)
 ' These varibles will be written to the file, extracted from licor/metek above
 Public metek_heatstatus_out
 Public metek_senspathstate_out
-Public metek_diag_out As String * 5
 Public metek_x_out
 Public metek_y_out 
 Public metek_z_out 
@@ -469,8 +472,7 @@ DataTable (table1,true,-1)
    Average(1,efoy_Ubat,FP2,False)
    Average(1,efoy_Laus,FP2,False)
    Average(1,efoy_Tst,FP2,False)
-   Average(1,efoy_Tint,FP2,False)
-   Average(1,efoy_Twt,FP2,False)  
+   Average(1,efoy_Tint,FP2,False)  
          
 EndTable
 
@@ -566,16 +568,6 @@ DataTable(table4,true,-1)
       Sample (1,vaisala_RH,FP2) 
 
 EndTable
-
-' This is for remote restarts
-' To manually reboot the logger, connect to the logger, go to the restarts DataTable 
-' and right-click on the "false" under ApplyAndRestart, View/Modify value and change
-' false to true.
-ConstTable (restarts)
-
-    Const restartstable = -1 
-
-EndConstTable
 
 ' =============================================================================
 
@@ -681,13 +673,17 @@ BeginProg
             EndIf
           EndIf
           
-          If IfTime (irid_offset+4,sumfile_freq,Min) Then 
-              ' Send the last 36 10 min avg summary data (past 6 hours)
-              'SendData (ComRS232,0,4094,sumfile,36)
-              SendVariables(callback_result, ComRS232,4094, 4094, 0000, 2500,"Public","Callback",dummy,1)
-          EndIf              
-
-        EndIf
+          If callback_on = 1
+            If IfTime (irid_offset+4,sumfile_freq,Min) Then 
+                ' Send the last 36 10 min avg summary data (past 6 hours)
+                'SendData (ComRS232,0,4094,sumfile,36)
+                SendVariables(callback_result, ComRS232,4094, 4094, 0000, 2500,"Public","Callback",dummy,1)
+            EndIf 
+          EndIf             
+                  
+        Else
+          PortSet(C2,0,1) ' make sure modem is off
+        EndIf  
         ' *********************************************************************
 
 
@@ -856,11 +852,10 @@ BeginProg
         ' SR30 SWU
         ' There are 3 modbus calls here because we do not have access to reguisters 198, 40s
         ' We can get away with negating the wait argument, which will prevent delays if the instrument goes down
-        ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,3,5,2,15,3
+        ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,3,5,2,15,3)
+        sr30_swu_DegC = sr30_swu_data(5) / 100
         sr30_swu_IrrC = ( sr30_swu_data(1)*2^16 + sr30_swu_data(2) ) / 100
         sr30_swu_Irr  = ( sr30_swu_data(3)*2^16 + sr30_swu_data(4) ) / 100
-        ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,7,1,2,15,1)
-        sr30_swu_DegC = sr30_swu_data(1) / 100
         ModbusMaster (sr30_swu_val,ComC5,19200,1,3,sr30_swu_data,195,3,1,15,3)
         sr30_swu_tilt   = sr30_swu_data(1) / 100 
         sr30_swu_fantach = sr30_swu_data(3) / 60 'Hz        
@@ -872,10 +867,9 @@ BeginProg
         ' There are 3 modbus calls here because we do not have access to reguisters 198, 40s
         ' We can get away with negating the wait argument, which will prevent delays if the instrument goes down
         ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,3,5,2,15,3)
+        sr30_swd_DegC = sr30_swd_data(5) / 100
         sr30_swd_IrrC = ( sr30_swd_data(1)*2^16 + sr30_swd_data(2) ) / 100
         sr30_swd_Irr  = ( sr30_swd_data(3)*2^16 + sr30_swd_data(4) ) / 100
-        ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,7,1,2,15,1)
-        sr30_swd_DegC = sr30_swd_data / 100
         ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,195,3,1,15,3)
         sr30_swd_tilt   = sr30_swd_data(1) / 100 
         sr30_swd_fantach = sr30_swd_data(3) / 60 'Hz        
@@ -897,18 +891,19 @@ BeginProg
         call_time_modbus_vaisala = Timer (1,mSec,4) 
         SerialClose (ComC5)
 
-        SerialOpen (ComC5,9600,2,0,100,4) 
-        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT32,30002,5,2,15,2)
-        efoy_Tst = efoy_dataINT32(1) * 0.001
-        efoy_Tint = efoy_dataINT32(3) * 0.001
-        efoy_Twt = efoy_dataINT32(5) * 0.001
-        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16,30016,1,2,15,3)
-        efoy_Ubat = efoy_dataUINT16(1) * 0.001
+        SerialOpen (ComC5,9600,2,0,100,4)
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT32tst,30002,1,2,15,2)
+        efoy_Tst = efoy_dataINT32tst * 0.001
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT32int,30004,1,2,15,2)
+        efoy_Tint = efoy_dataINT32int * 0.001
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16bat,30016,1,2,15,3)
+        efoy_Ubat = efoy_dataUINT16bat * 0.001
         ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT16,30029,1,2,15,1)
         efoy_Laus = efoy_dataINT16 * 0.001  
-        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16,30036,3,2,15,3)
-        efoy_FuellSt = efoy_dataUINT16(1) * 0.01
-        efoy_Error = efoy_dataUINT16(3)
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16f,30036,1,2,15,3)
+        efoy_FuellSt = efoy_dataUINT16f * 0.01
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16e,30038,1,2,15,3)
+        efoy_Error = efoy_dataUINT16e
         call_time_efoy = Timer (1,mSec,4) 
         SerialClose (ComC5)
         
@@ -943,3 +938,4 @@ BeginProg
 EndProg
 
 ' =============================================================================
+           
