@@ -1,4 +1,4 @@
-Public PgmVersion As String = "ASFS50_SPLASH_803"
+Public PgmVersion As String = "ASFS50_SPLASH_804"
 
 ' Autonomous Surface Flux System (ASFS) - MOSAiC
 ' ASFS 50
@@ -68,7 +68,7 @@ Const crdfile_freq As Long = 30 ' [min]          ' Frequency of new files contai
 Const crdsoil_freq As Long = 1  ' [day]          ' How often to write soil data to card
 Const datafile_avg As Long = 60 ' [sec]          ' Data file averaging time: 60 = 1 min averages
 Const soilfile_avg As Long = 60 ' [min]          ' Data file averaging time: 60 = 60 min averages
-Const irid_offset  As Long = 0                   ' The value is unique for each ASFS. Iridium data will be sent at staggered intervals between the stations
+Const irid_offset  As Long = 30                  ' The value is unique for each ASFS. Iridium data will be sent at staggered intervals between the stations
 
 ' Set Cals
 Const fp_A_s = 60.00/1000 ' 5636 Sensitivity [mV/(W/m2)]
@@ -555,7 +555,8 @@ DataTable (sum_table,true,36)
     Average (1,sr30_swu_tilt,FP2,False)         
     Average (1,sr30_swd_tilt,FP2,False)  
     Average (1,efoy_Ubat,FP2,False)                 
-        
+    Average (1,efoy_Laus,FP2,False)
+            
 EndTable  
     
 ' fast data
@@ -697,7 +698,7 @@ BeginProg
         ' Cox added options to PortSet to allow program to compile in Pipeline
         '    
         ' at the top of every 6 hours (sumfile_freq nominally = 360 min, see settings at top) turn on the modem
-        If TimeIsBetween(irid_offset,irid_offset+55,sumfile_freq,Min)
+        If TimeIsBetween(irid_offset,irid_offset+sumfile_freq-1,sumfile_freq,Min)
           PortSet(C2,1,1)
           Flag(1)=True
         Else
@@ -705,8 +706,8 @@ BeginProg
           Flag(1)=False
         EndIf
         
-        ' then at 6 hours + irid_offset configure the modem
-        If IfTime(irid_offset+1,sumfile_freq,Min) Then 
+        ' then do a config at 
+        If IfTime(irid_offset,sumfile_freq,Min) Then 
           Configure_Modem = True
         EndIf
         
