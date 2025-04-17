@@ -1,0 +1,266 @@
+' LOCATION:
+'          Alert, Canada
+'          NOAA/PSD Platform CR1000 Logger Program
+'
+' AUTHOR:
+'          Chris Cox 10/17/2016
+'
+' PURPOSE:
+'          Logger program for NOAA/PSD Alert Platform new instrumentation added October 2016.
+'          CR1000
+'          Program includes:
+'                 Lufft UCB                  1 m
+'                 Lufft UCB                  3 m
+'                 T107 Temperature Probe
+'                 CS616 Soil Moisuture Probe from Bob Zimora
+'                 Theta ML2x Soil Moisture Probe 
+'
+' UPDATES:
+'          DD 05 2016: Andy Clarke 
+'                 Begin with Lufft UCB sections of Summit Met Progam
+'                 Last revision SUM20160628.cr1
+'                 *****Chopped out everything BUT the Ventus code as a sample****
+'                 ran on the summit cr1000 to make sure it worked after the edit and saved here as sumventus.cr1. -ac
+
+
+' ===================================================================================================================
+
+
+' =========================== SETUP VARIABLES ===============================
+
+'\\\\\\\\\\\\\\\\\\\\\\\\\ LOGGER ///////////////////////////////////////////
+Public Battery_Voltage                     ' Battery Voltage
+Public Logger_Temp                         ' Logger Temperature
+Units Battery_Voltage = volts                   
+Units Logger_Temp = deg C
+Public OutString_Logger As String * 1000
+Public OutString_Lufft1mData As String * 1000
+Public OutString_Lufft1mDiag As String * 1000
+Public OutString_Lufft3mData As String * 1000
+Public OutString_Lufft3mDiag As String * 1000
+Public OutString_CS616 As String * 1000
+Public OutString_CR As String * 1000
+Public OutString_T107L As String * 1000
+Public OutString_ML2x As String * 1000
+
+'\\\\\\\\\\\\\\\\\\\\\\\\\ SETUP WIND DATA //////////////////////////////////
+Public ret1
+
+Public WSData0_1m(4)                       ' 4 element vector to store data on the 0 buffer
+Public WSData1_1m(4)                       ' 4 element vector to store data on the 1 buffer (
+Public WSDiag0_1m(2)                       ' 2 element vector to store diagnostics on the 0 buffer (status groups for air and wind)
+Public WSDiag1_1m(2)                       ' 2 element vector to store temperatures of the heating elements in upper and lower sections
+
+Alias WSData0_1m(1)=Sonic_Temp_1m          ' virtual (sonic) temperature
+Alias WSData0_1m(2)=Wind_Speed_Act_1m      ' last (current) sample
+Alias WSData0_1m(3)=Wind_Speed_Max_1m      ' maximum wind speed in sampling (1-60 meas)
+Alias WSData0_1m(4)=Wind_Speed_Avg_1m      ' average wind speed
+
+Alias WSData1_1m(1)=Wind_Direction_Act_1m  ' wind direction of the last (current) sample
+Alias WSData1_1m(2)=Wind_Direction_Vct_1m  ' wind direction calculated from vector averaging
+Alias WSData1_1m(3)=Wind_Quality_1m        ' %, 90-100% = normal, below 50% suggests problem
+Alias WSData1_1m(4)=Sonic_Press_1m         ' air pressure
+
+Alias WSDiag0_1m(1)=a_err_1m               ' "air error"; temp/buffer, pres/buffer
+Alias WSDiag0_1m(2)=w_err_1m               ' "wind error"; wind/buffer
+Alias WSDiag1_1m(1)=t_top_1m               ' upper heating temperature
+Alias WSDiag1_1m(2)=t_bot_1m               ' lower heating temperature
+
+Public WSData0_3m(4)                       ' 4 element vector to store data on the 0 buffer
+Public WSData1_3m(4)                       ' 4 element vector to store data on the 1 buffer (
+Public WSDiag0_3m(2)                       ' 2 element vector to store diagnostics on the 0 buffer (status groups for air and wind)
+Public WSDiag1_3m(2)                       ' 2 element vector to store temperatures of the heating elements in upper and lower sections
+
+Alias WSData0_3m(1)=Sonic_Temp_3m          ' virtual (sonic) temperature
+Alias WSData0_3m(2)=Wind_Speed_Act_3m      ' last (current) sample
+Alias WSData0_3m(3)=Wind_Speed_Max_3m      ' maximum wind speed in sampling (1-60 meas)
+Alias WSData0_3m(4)=Wind_Speed_Avg_3m      ' average wind speed
+
+Alias WSData1_3m(1)=Wind_Direction_Act_3m  ' wind direction of the last (current) sample
+Alias WSData1_3m(2)=Wind_Direction_Vct_3m  ' wind direction calculated from vector averaging
+Alias WSData1_3m(3)=Wind_Quality_3m        ' %, 90-100% = normal, below 50% suggests problem
+Alias WSData1_3m(4)=Sonic_Press_3m         ' air pressure
+
+Alias WSDiag0_3m(1)=a_err_3m               ' "air error"; temp/buffer, pres/buffer
+Alias WSDiag0_3m(2)=w_err_3m               ' "wind error"; wind/buffer
+Alias WSDiag1_3m(1)=t_top_3m               ' upper heating temperature
+Alias WSDiag1_3m(2)=t_bot_3m               ' lower heating temperature
+
+'\\\\\\\\\\\\\\\\\\\\\\\\\ SOIL MOSTURE #1 ////////////////////////////////// 
+' CS6XX TDR MOISTURE PROBE, ie "Zimora"
+'Declare Variables and Units
+Public VW
+Public PA_uS
+Units PA_uS=uSec
+
+'\\\\\\\\\\\\\\\\\\\\\\\\\ T107L Temperature ////////////////////////////////
+Public T107_C
+Units T107_C=Deg C
+
+'\\\\\\\\\\\\\\\\\\\\\\\\\ THETA ML2x SOIL MOSTURE ////////////////////////////////// 
+' Theta ML2x Soil Moisture Probe
+'Declare Variables and Units
+Public sm1
+Alias sm1 = VWC
+Units VWC = Volts
+
+'======================== OUTPUT SECTION ===================================
+'Define Data Tables
+
+DataTable(SAVING1MINBACKUP,True,-1)
+  
+  DataInterval(0,1,sec,0)
+        
+        'CR1000 standard diagnostics
+ 	      Average(1,Logger_Temp,FP2,False)
+	      Average(1,Battery_Voltage,FP2,False)   
+	             
+	      'Wind measurements       
+        Average(1,Sonic_Temp_1m,FP2,False)
+        Average(1,Wind_Speed_Act_1m,FP2,False)
+        Maximum(1,Wind_Speed_Max_1m,FP2,False,False)
+        Average(1,Wind_Speed_Avg_1m,FP2,False)
+        Average(1,Wind_Direction_Act_1m,FP2,False)     
+        Average(1,Wind_Direction_Vct_1m,FP2,False)        
+        Average(1,Sonic_Press_1m,FP2,False)
+        
+        'Wind diagnostics 
+        Average(1,Wind_Quality_1m,FP2,False)  
+        Average(1,w_err_1m,FP2,False)
+        Average(1,a_err_1m,FP2,False)
+        Average(1,t_top_1m,FP2,False)
+        Average(1,t_bot_1m,FP2,False)  
+        
+	      'Wind measurements       
+        Average(1,Sonic_Temp_3m,FP2,False)
+        Average(1,Wind_Speed_Act_3m,FP2,False)
+        Maximum(1,Wind_Speed_Max_3m,FP2,False,False)
+        Average(1,Wind_Speed_Avg_3m,FP2,False)
+        Average(1,Wind_Direction_Act_3m,FP2,False)     
+        Average(1,Wind_Direction_Vct_3m,FP2,False)        
+        Average(1,Sonic_Press_3m,FP2,False)
+        
+        'Wind diagnostics 
+        Average(1,Wind_Quality_3m,FP2,False)  
+        Average(1,w_err_3m,FP2,False)
+        Average(1,a_err_3m,FP2,False)
+        Average(1,t_top_3m,FP2,False)
+        Average(1,t_bot_3m,FP2,False)  
+
+        'TDR100 "ZIMORA"
+        Average (1,VW,FP2,False) 
+        StdDev (1,VW,FP2,False)
+        
+        'T207L
+        Average (1,T107_C,FP2,False) 
+        StdDev (1,T107_C,FP2,False)
+
+        'THETA ML2x SOIL MOISTURE 
+        Average (1,sm1,FP2,False)
+        StdDev (1,sm1,FP2,False)
+  
+EndTable
+  
+  
+'\\\\\\\\\\\\\\\\\\\\\\\\\\\ PROGRAM ////////////////////////////
+BeginProg
+  
+	Scan(1,Sec,1,0) ' 1 sec interval, buffer = 1, execute once
+	  
+		'Default Datalogger Battery Voltage measurement
+		Battery(Battery_Voltage)
+		
+		'Default Wiring Panel Temperature measurement
+		PanelTemp(Logger_Temp,_60Hz)
+		
+    ' ////////////////////////// WINDS \\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+    '6m Lufft Ventus Sonic...I will put these on a slow sequence. 
+    'I found if the SDI12 comms hangs waiting for a response, I get skipped scans.
+    'This only happens when I disconnect one of the sonics while still running. 
+    'If one fails in the future it could cause problems if in the main scan. 
+		
+		' send to WSData0_1m, read from COM1, SDI12 address = 0, 
+		' continuous measurement at address 0, multiplier = 1, offset = 0
+      SDI12Recorder(WSData0_1m,1,0,"R0!",1.0,0) 
+      SDI12Recorder(WSData1_1m,1,0,"R1!",1.0,0)
+      'V! verification queries the device status information, which is then sent with a D! command. 
+      'D0 is 0 buffer, 
+      SDI12Recorder(ret1,1,0,"V!",1.0,0)
+	    SDI12Recorder(WSDiag1_1m,1,0,"D1!",1.0,0)
+      SDI12Recorder(ret1,1,0,"V!",1.0,0)
+	    SDI12Recorder(WSDiag0_1m,1,0,"D0!",1.0,0)
+	    
+		' send to WSData0_1m, read from COM1, SDI12 address = 0, 
+		' continuous measurement at address 0, multiplier = 1, offset = 0
+      SDI12Recorder(WSData0_3m,3,0,"R0!",1.0,0)
+      SDI12Recorder(WSData1_3m,3,0,"R1!",1.0,0)
+      'V! verification queries the device status information, which is then sent with a D! command. 
+      'D0 is 0 buffer, 
+      SDI12Recorder(ret1,3,0,"V!",1.0,0)
+	    SDI12Recorder(WSDiag1_3m,3,0,"D1!",1.0,0)
+      SDI12Recorder(ret1,3,0,"V!",1.0,0)
+	    SDI12Recorder(WSDiag0_3m,3,0,"D0!",1.0,0)
+	    
+    ' /////////////////////////// CS6XX TDR \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+    ' "Zimora"
+    'CS616 Water Content Reflectometer measurements 'VW' and 'PA_uS'
+      CS616(PA_uS,1,1,2,1,1,0)
+			VW=-0.0663+(-0.0063*PA_uS)+(0.0007*PA_uS^2)
+   
+     '/////////////////////////// T107-L TEMPERATURE \\\\\\\\\\\\\\\\\\\\\\\
+		'107 Temperature Probe measurement 'T107_C'
+		Therm107(T107_C,1,3,1,0,_60Hz,1,0)
+		
+    ' ////////////////////////// THETA ML2x SOIL MOISTURE \\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+    'Switch on power for ML2x (SW 12V-1)
+    VoltDiff(sm1,1,mv5000,3,True,0,_50Hz,1.0,0)
+    VWC = 5.1853+0.0721*sm1-6.9877E-5*sm1^2+5.3643E-8*sm1^3
+       
+    ' SEND DATA
+    ' Here we concatenate the data we just read into one long comma-separated string.
+    ' Then we send the sting out the RS232 port on the logger...NOAA Services
+    ' we receive it on the other end.
+    
+    ' Open the COM port
+    SerialOpen (ComRS232,9600,0,0,10000)
+    
+    ' Create the string
+    ' sent as a single line, but separated here as...
+    '    - Logger housekeeping
+    '    - 1m Lufft Data
+    '    - 1m Lufft Diag
+    '    - 3m Lufft Data
+    '    - 3m Lufft Diag
+    '    - CS616 Soil Moisture Probe "Zimora"
+    '    - T107L Temperature Probe
+    '    - Theta ML2x Soil Moisture Probe
+    '    - **cariage return**
+    '    COLUMNS
+    '        Logger[C],BattV[V],SonicT1m[C],WindSACT1m[m/s],WindDACT1m[deg],WindSVCT1m[m/s],WindDVCT1m[deg],
+    '        SonicPr1m[mb],WQual1m[%],werr1m,aerr1m,topT1m[C],botT1m[C],SonicT3m[C],WindSACT3m[m/s],WindDACT3m[deg],
+    '        WindSVCT3m[m/s],WindDVCT3m[deg],SonicPr3m[mb],WQual3m[%],werr3m,aerr3m,topT3m[C],botT3m[C],VW,T107[C],VWC
+    OutString_Logger      = Logger_Temp + CHR(44) + Battery_Voltage + CHR(44)
+    OutString_Lufft1mData = Sonic_Temp_1m + CHR(44) + Wind_Speed_Act_1m + CHR(44) + Wind_Direction_Act_1m + CHR(44) + _
+              Wind_Direction_Vct_1m + CHR(44) + Sonic_Press_1m + CHR(44)
+    OutString_Lufft1mDiag = Wind_Quality_1m + CHR(44) + w_err_1m + CHR(44) + a_err_1m + CHR(44) + t_top_1m + CHR(44) + t_bot_1m + CHR(44)  
+    OutString_Lufft3mData = Sonic_Temp_3m + CHR(44) + Wind_Speed_Act_3m + CHR(44) + Wind_Direction_Act_3m + CHR(44) + _
+              Wind_Direction_Vct_3m + CHR(44) + Sonic_Press_3m + CHR(44) + Wind_Quality_3m + CHR(44)    
+    OutString_Lufft3mDiag = Wind_Quality_3m + CHR(44) + w_err_3m + CHR(44) + a_err_3m + CHR(44) + t_top_3m + CHR(44) + t_bot_3m + CHR(44)
+    OutString_CS616       = VW + CHR(44) 
+    OutString_T107L       = T107_C + CHR(44)
+    OutString_ML2x        = VWC
+    OutString_CR          = CHR(13)
+
+    'Send String over COM port (COM9 TX).
+     SerialOut (ComRS232,OutString_Logger+OutString_Lufft1mData+OutString_Lufft1mDiag+OutString_Lufft3mData+OutString_Lufft3mDiag+ _
+       OutString_CS616+OutString_T107L+OutString_ML2x+OutString_CR,"",0,100)
+
+	  'Call Data Tables
+		CallTable SAVING1MINBACKUP
+			
+		NextScan
+				
+EndProg
+' =========================================================================================================
+
+
