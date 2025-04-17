@@ -1,0 +1,111 @@
+Public PgmVersion As String = "MARC_102"
+' Mobile Radiometric Intercomparison Station
+'
+' CR1000
+'
+' Program author: C. Cox christopher.j.cox@noaa.gov
+'
+' 5/12/2019  
+'
+' Updates:
+'    
+'   This program runs 1x K&Z CMP22 & CGR4
+' ---------------------------------------------------------------------
+'     Manuf.     Model   SN         Owner      Ch        Note
+' ---------------------------------------------------------------------  
+'     K&Z        CMP22   090057     K&Z        D1/SE7      V(D1)+1xtherm
+'     K&Z        CGR4    080068     K&Z        D2/SE8      V(D2)+1xtherm 
+' ---------------------------------------------------------------------
+
+
+' =====================================================================
+' Declare Public Variables
+Const sig = 5.67*10^-8
+Const cmp22_090057_S = 9.4 * 10^-6
+Const cgr4_080068_S = 11.1 * 10^-6
+
+' Logger ...
+Public PTemp, batt_volt
+
+' Kipp and Zonen
+Public cmp22_090057_mV
+Public cmp22_090057_CaseR
+Public cmp22_090057_DegC
+Public cmp22_090057_SWD
+Public cgr4_080068_mV
+Public cgr4_080068_CaseR
+Public cgr4_080068_DegC
+Public cgr4_080068_LWD
+
+' Box Temp with Type-T thermocouple
+Public boxT_DegC
+
+' =====================================================================
+
+
+' =====================================================================
+' Define Data Tables.
+DataTable (MARC,1,-1)	
+  
+  DataInterval (0,60,Sec,10)
+	
+   ' Logger ...
+	 Average (1,PTemp,IEEE4,False)
+   Average (1,batt_volt,IEEE4,False)
+   Average (1,boxT_DegC,IEEE4,False)
+   StdDev  (1,boxT_DegC,IEEE4,False)
+   
+   ' Kipp and Zonen
+   Average (1,cmp22_090057_mV,IEEE4,False)
+   StdDev  (1,cmp22_090057_mV,IEEE4,False)
+   Average (1,cmp22_090057_CaseR,IEEE4,False)
+   StdDev  (1,cmp22_090057_CaseR,IEEE4,False)
+   Average (1,cmp22_090057_DegC,IEEE4,False)
+   StdDev  (1,cmp22_090057_DegC,IEEE4,False)
+   Average (1,cgr4_080068_mV,IEEE4,False)
+   StdDev  (1,cgr4_080068_mV,IEEE4,False)
+   Average (1,cgr4_080068_DegC,IEEE4,False)
+   StdDev  (1,cgr4_080068_DegC,IEEE4,False)
+   Average (1,cgr4_080068_CaseR,IEEE4,False)
+   StdDev  (1,cgr4_080068_CaseR,IEEE4,False)
+    
+EndTable
+' =====================================================================
+
+
+' =====================================================================
+'Main Program
+BeginProg
+
+	Scan (1,Sec,0,0)
+
+	  ' Logger ...
+		PanelTemp (PTemp,250)
+		Battery (batt_volt)
+
+    ' Kipp and Zonen
+   ' CMP22 090057
+    VoltDiff (cmp22_090057_mV,1,AutoRange,1,True ,0,_60Hz,1.0,0)
+    BrHalf (cmp22_090057_CaseR,1,mV250,7,Vx1,1,250,True ,0,_60Hz,1,0)
+    cmp22_090057_CaseR     = 50000 * (cmp22_090057_CaseR / (1 - cmp22_090057_CaseR))
+    cmp22_090057_DegC      = 1/(0.0010295 + 0.0002391 * LN(cmp22_090057_CaseR) + 0.0000001568 * LN(cmp22_090057_CaseR)^3)-273.15   
+    cmp22_090057_SWD       = cmp22_090057_mV / (cmp22_090057_S*1000)
+
+    ' CGR4 080068
+    VoltDiff (cgr4_080068_mV,1,AutoRange,2,True ,0,_60Hz,1.0,0)
+    BrHalf (cgr4_080068_CaseR,1,mV250,8,Vx1,1,250,True ,0,_60Hz,1,0)
+    cgr4_080068_CaseR      = 50000 * (cgr4_080068_CaseR / (1 - cgr4_080068_CaseR))
+    cgr4_080068_DegC       = 1/(0.0010295 + 0.0002391 * LN(cgr4_080068_CaseR) + 0.0000001568 * LN(cgr4_080068_CaseR)^3)-273.15
+    cgr4_080068_LWD        = cgr4_080068_mV / (cgr4_080068_S*1000) + (sig *(cgr4_080068_DegC+273.15)^4) 
+
+		'Type T Thermocouple measurements
+		TCDiff(boxT_DegC,1,mV2_5C,8,TypeT,PTemp,True,0,_60Hz,1,0)
+		
+    CallTable(MARC)
+
+	NextScan
+
+EndProg
+
+' =====================================================================	
+
