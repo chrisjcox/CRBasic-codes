@@ -53,6 +53,7 @@ PipelineMode
 Const stname               = "ASFS_30"           ' ASFS Station name
 Const slow_table           = "slow"              ' "1 min" avg data filename
 Const sum_table            = "sumfile"           ' "summary" (i.e, 6 hr of 10 min avg) filename
+Const eng_table            = "engfile"           ' "summary" (i.e, 6 hr of 10 min avg) filename
 Const fast_table           = "fast"              ' "fast" (i.e., 20 Hz) filename
 Const met_table            = "met"               ' 5s vaisala data
 Const soil_table           = "soil"              ' soil data
@@ -62,8 +63,8 @@ Const shipradioIP          = "192.168.202.6"     ' IP for the base station (ship
 Const asfsradioIP          = "192.168.202.33"    ' IP for this asfs station radio
 Const base_no              = "xxxxxxxxxxxxxx"    ' base station number for the spare iridium modem pair used in container beginning in may 2020
 Const scan_freq    As Long = 5  ' [sec]          ' the scan cycle
-Const sumfile_avg  As Long = 10 ' [min]          ' Summary file averaging period: 10 = 10 min averages
-Const sumfile_freq As Long = 60 ' [min]          ' How often do you want to send summary files if on iridium?
+Const sumfile_avg  As Long = 180 ' [min]          ' Summary file averaging period: 10 = 10 min averages
+Const sumfile_freq As Long = 1440 ' [min]          ' How often do you want to send summary files if on iridium?
 Const crdfile_freq As Long = 30 ' [min]          ' Frequency of new files containing 20 Hz data 
 Const crdsoil_freq As Long = 1  ' [day]          ' How often to write soil data to card
 Const datafile_avg As Long = 60 ' [sec]          ' Data file averaging time: 60 = 1 min averages
@@ -534,12 +535,10 @@ EndTable
 DataTable (sum_table,true,36)
  
    DataInterval (0,sumfile_avg,Min,10)
-                                                                        
-    Average (1,metek_InclX,FP2,False)                            
-    Average (1,metek_InclY,FP2,False)      
+                                                                             
     Average (1,PTemp,FP2,False)                  
     Totalize (1,counts_main,UINT2,False)	          
-    Average (1,vaisala_P,IEEE4,False)              
+    Average (1,vaisala_P,FP2,False)              
     Average (1,vaisala_T,FP2,False)              
     Average (1,vaisala_RH,FP2,False)             
     Average (1,apogee_targ_T,FP2,False)          
@@ -551,19 +550,16 @@ DataTable (sum_table,true,36)
     Average (1,fp_A_Wm2,FP2,False)                 
     Average (1,fp_B_Wm2,FP2,False)                        
     Average (1,metek_x(),FP2,False)                                 
-    Average (1,metek_y(),FP2,False)                    
-    Sample  (1,metek_senspathstate_out,UINT2,False)   
-    Average (1,sr30_swu_fantach,UINT2,False)           
-    Average (1,sr30_swu_heatA,UINT2,False)              
-    Average (1,sr30_swd_fantach,UINT2,False)           
-    Average (1,sr30_swd_heatA,UINT2,False)          
+    Average (1,metek_y(),FP2,False)    
+    Average (1,sr30_swu_fantach,UINT2,False)                       
+    Average (1,sr30_swd_fantach,UINT2,False)                    
     Average (1,sr30_swu_tilt,FP2,False)         
-    Average (1,sr30_swd_tilt,FP2,False)    
-    Average (1,ir20_lwu_DegC,FP2,False)
-    Average (1,ir20_lwd_DegC,FP2,False)      
- 
+    Average (1,sr30_swd_tilt,FP2,False)  
+    Average (1,efoy_Ubat,FP2,False)                 
+        
 EndTable  
 
+    
 ' fast data
 ' Saved to SD-card at in crdfile_freq (nominally 1-hr) blocks
 ' 36000 limits this table to 0.5 hours
