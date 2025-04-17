@@ -1,4 +1,4 @@
-Public PgmVersion As String = "IGB_H_002_v111"
+Public PgmVersion As String = "IGB_H_002_v112"
 '
 ' Artic Mobile Observing System (AMOS)
 ' 2021 Surface Energy Budget "MET" program
@@ -15,6 +15,7 @@ Public PgmVersion As String = "IGB_H_002_v111"
 '   3/31/2020-5/11/2020, initial development thru v104 
 '   11/23/2021; v 110. set spc on time to be 1700-1730 to match certus lan. metek heater mode to auto function. tried to give IMU oritentation based on Anthony's report
 '   12/23/21: v111. trying to fix vaisala_T problem
+'   12/28/21: vn3000 default off bc antenna failures. spc on beg 1650.
 
 ' -----------------------------------------------------------------------------
 '     Manuf.     Model        SN          Function    Ch             Note
@@ -111,8 +112,8 @@ Const Pi = 3.141593             ' Pi
 ConstTable (pwr_panel) 
     
   ' 12 VDC channels (16) and Flags            1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6
-  Const light_switch_sum_default As String = "1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,0" ' MAMJJAS
-  Const light_switch_win_default As String = "1,1,0,0,1,1,0,0,1,1,0,0,0,0,1,0" ' DJF 
+  Const light_switch_sum_default As String = "0,1,1,1,1,1,0,0,1,1,1,1,1,1,1,0" ' MAMJJAS
+  Const light_switch_win_default As String = "0,1,0,0,1,1,0,0,1,1,0,0,0,0,1,0" ' DJF 
   Const light_switch_override    As String = "x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x" 
   Const light_switch_mode        As String = "M" 
   
@@ -339,22 +340,22 @@ DataTable (tableS,true,-1)
    Average (1,batt_volt,FP2,False)   
    
    ' Nav
-   Average (1,lat_deg,FP2,False)   
-   Average (1,lat_min,IEEE8,False)  
-   Average (1,lon_deg,FP2,False)           
-   Average (1,lon_min,IEEE8,False)
-   Average (1,sog,FP2,False) 
-   Average (1,cog,FP2,False) 
-   Average (1,alt,FP2,False) 
-   Average (1,hdg,IEEE4,False)   
-   Average (1,roll,IEEE4,False)   
-   Average (1,pitch,IEEE4,False)
-   Average (1,roll_accuracy,IEEE4,False)
-   Average (1,pitch_accuracy,IEEE4,False)
-   Average (1,hdg_accuracy,IEEE4,False)
-   Sample  (1,gps_fix,FP2)
-   Average (1,nsat,FP2,False)
-   Average (1,hdop,FP2,False)      
+   'Average (1,lat_deg,FP2,False)   
+   'Average (1,lat_min,IEEE8,False)  
+   'Average (1,lon_deg,FP2,False)           
+   'Average (1,lon_min,IEEE8,False)
+   'Average (1,sog,FP2,False) 
+   'Average (1,cog,FP2,False) 
+   'Average (1,alt,FP2,False) 
+   'Average (1,hdg,IEEE4,False)   
+   'Average (1,roll,IEEE4,False)   
+   'Average (1,pitch,IEEE4,False)
+   'Average (1,roll_accuracy,IEEE4,False)
+   'Average (1,pitch_accuracy,IEEE4,False)
+   'Average (1,hdg_accuracy,IEEE4,False)
+   'Sample  (1,gps_fix,FP2)
+   'Average (1,nsat,FP2,False)
+   'Average (1,hdop,FP2,False)      
 
    ' Vaisala
    Average (1,vaisala_RH,FP2,False) 
@@ -579,7 +580,7 @@ BeginProg
         EndIf                 
         
         ' SPC schedule
-        If Hour = 17 AND Minute < 30 Then
+        If Hour = 16 AND Minute > 50 OR Hour = 17 AND Minute < 30 Then
           spc_override = 1
           light_switch_go(16) = 1
         EndIf
