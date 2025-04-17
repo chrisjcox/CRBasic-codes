@@ -1,4 +1,4 @@
-Public PgmVersion As String = "ASFS50_601"
+Public PgmVersion As String = "ASFS50_602_nolicor_apogeeswitch"
 '
 ' Autonomous Surface Flux System (ASFS) - MOSAiC
 ' ASFS 50
@@ -15,7 +15,8 @@ Public PgmVersion As String = "ASFS50_601"
 '   2/13/2019 - 4/16/2019: version ASFS_2xx (200-210): Testing Phase     LLLL = 4323
 '   4/16/2019 - 5/4/2019:  version ASFS_3xx (300-302): Outdoor tests / comms LLLL = 4323
 '   5/4/2019  - 7/1/2019:  version ASFS_4xx (401-409): Dialing it in LLLL = 4323
-'   7/12/2019 -         :  version ASFS_NN_5xx       : All three stations together 
+'   7/12/2019 -         :  version ASFS_NN_5xx       : All three stations together
+'   11/13/2019			   version ASFS_602_nolicor_apogeeswitch : switched the apogee body_T with Targ_T		  
 '
 '
 ' -----------------------------------------------------------------------------
@@ -49,11 +50,9 @@ Const table2       = "sumfile"        ' "summary" (i.e, 6 hr of 10 min avg) file
 Const table3       = "fast"           ' "fast" (i.e., 20 Hz) filename
 Const table4       = "met"            ' 5s vaisala data
 Const metekPort As Long = 5001             ' TCP/IP port number used by the sonic
-Const licorPort As Long = 7200             ' TCP/IP port number used by the licor
 Const loggerIP     = "192.168.202.50"   ' IP assigned to this logger
 Const NTPServIP    = "10.10.10.10"    ' NTP Server IP address for setting the logger clock
 Const metekIP      = "192.168.202.55"   ' IP assigned to metek sonic
-Const licorIP      = "192.168.202.54"   ' IP assigned to licor 7500ds
 Const IridiumIP    = "192.168.1.50"   ' Iridium Modem Registration
 Const shipradioIP  = "192.168.202.6"    ' IP for the base station (ship side) radio
 Const asfsradioIP  = "192.168.202.53"  ' IP for this asfs station radio
@@ -248,21 +247,6 @@ Units metek_T = degC
 Units metek_InclX = deg
 Units metek_InclY = deg
 
-' Licor
-Public HandleL As Long
-Public licor_tcp_result
-Public licor_socket
-Public RawStringL As String * 9000
-Public SplitStringsL(101) As String * 150
-Public licorstr As String * 150
-Public SplitStringsL2(9) As String * 25
-Public licor_diag(101)
-Public licor_co2(101)
-Public licor_h2o(101)
-Public licor_co2_str(101)
-Public licor_pr(101)
-Public licor_t(101)
-
 ' These varibles will be written to the file, extracted from licor/metek above
 Public metek_heatstatus_out
 Public metek_senspathstate_out
@@ -272,12 +256,6 @@ Public metek_z_out
 Public metek_T_out 
 Public metek_InclX_out
 Public metek_InclY_out  
-Public licor_diag_out
-Public licor_co2_out
-Public licor_h2o_out
-Public licor_co2_str_out
-Public licor_pr_out
-Public licor_t_out
 Units metek_heatstatus_out = code
 Units metek_senspathstate_out = N
 Units metek_x_out = mm/s
@@ -286,12 +264,7 @@ Units metek_z_out = mm/s
 Units metek_T_out = degC 
 Units metek_InclX_out = deg
 Units metek_InclY_out = deg
-Units licor_diag_out = code
-Units licor_co2_out = mg/m3
-Units licor_h2o_out = g/m3
-Units licor_t_out = degC
-Units licor_pr_out = Pa
- 
+
 ' GPS 
 Public NMEAStrings(4) As String * 100 = {"$GPRMC","$GPGGA","$HEHDT","GPGZDA"}
 Public GPS_Data(25) As Double
@@ -436,17 +409,7 @@ DataTable (table1,true,-1)
    StdDev  (1,fp_B_mV,IEEE4,False)
    Average (1,fp_B_Wm2,IEEE4,False)
    StdDev  (1,fp_B_Wm2,IEEE4,False) 
-   
-   ' Licor
-   Average (1,licor_co2,IEEE4,False)
-   StdDev  (1,licor_co2,IEEE4,False)
-   Average (1,licor_h2o,IEEE4,False)
-   StdDev  (1,licor_h2o,IEEE4,False) 
-   Average (1,licor_t,FP2,False)
-   StdDev  (1,licor_t,FP2,False)       
-   Average (1,licor_co2_str_out,IEEE4,False)
-   StdDev  (1,licor_co2_str_out,IEEE4,False)     
-
+    
    ' Fantachs
    Average (1,sr30_swu_fantach,FP2,False)
    Average (1,sr30_swu_heatA,FP2,False)
@@ -524,10 +487,6 @@ DataTable (table3,true,36001)
       Sample(1,metek_T_out,IEEE4)                        
       Sample(1,metek_heatstatus_out,UINT2)                    
       Sample(1,metek_senspathstate_out,UINT2)
-      Sample(1,licor_co2_out,IEEE4)
-      Sample(1,licor_h2o_out,IEEE4)
-      Sample(1,licor_pr_out,IEEE4)
-      Sample(1,licor_diag_out,UINT2)
       
 EndTable
 
@@ -575,7 +534,6 @@ BeginProg
 
     ' TCPOpen opens the ethernet port for reading, IP = sonic's IP, handle is the port handle 
     ' Field change, 2019 Oct 7: Sonic thru serial             
-    licor_socket = TCPOpen (licorIP,licorPort,6001,100,HandleL,1)  ' LICOR: network
     SerialOpen (ComME,57600,0,0,12001)
     
     ' Be and NTP server
@@ -599,14 +557,6 @@ BeginProg
         
         ' This is a continuous storage of metek and licor data in a ring buffer of size = last argument in bytes   
         metek_422_result = SerialInBlock (ComME,RawStringM,12001)
-        licor_tcp_result = SerialInBlock (HandleL,RawStringL,5001)
-        
-        ' If for some reason the metek or licor reboot the network line is interupted, we need to restart the
-        ' the connection or else the logger won't receive the data anymore
-        If licor_socket = 0 OR licor_tcp_result = 0 Then
-          TCPClose (licor_socket)
-          licor_socket = TCPOpen (licorIP,licorPort,15001,100,HandleL,1)
-        EndIf
         
         ' ***********************************************************************
     
@@ -760,31 +710,6 @@ BeginProg
             Next k
           EndIf
  
-        ' ***************************** LICOR ********************************* 
-        ' Read all 20 values from the last second as they come in, stored in serial buffer
-        ' Then split the string into 20 lines, calling the data table 20 times         
-          If Len(RawStringL) > 1
-            SplitStr (SplitStringsL(),RawStringL,CHR(10),101,5) ' split strings by LF (CHR10)
-
-            ' for each string
-            For k = 1 To 100
-              ' collect the msg and trim some of the extra. some of this can be removed when ASFS_licor call table is removed
-              licorstr = SplitStringsL(k)
-              licorstr = Replace (licorstr,CHR(10),"") ' remove the line feed
-              licorstr = Replace (licorstr,CHR(09),",") ' replace all tabs with commas
-              licorstr = Replace (licorstr,CHR(32),",") ' replace all space with commas
-              
-              ' extract the variables 
-              SplitStr (SplitStringsL2(),licorstr,",",6,5)
-              licor_diag(k) = SplitStringsL2(1)
-              licor_co2(k) = SplitStringsL2(2)
-              licor_h2o(k) = SplitStringsL2(3)
-              licor_co2_str(k) = SplitStringsL2(6)
-              licor_t(k) = SplitStringsL2(4)
-              licor_pr(k) = SplitStringsL2(5)                          
-            Next k
-          EndIf 
-
           ' Write to the Table
           For k = 1 To 100
               metek_x_out = metek_x(k)
@@ -795,12 +720,6 @@ BeginProg
               metek_InclY_out = metek_InclY(k)
               metek_heatstatus_out = metek_heatstatus(k)
               metek_senspathstate_out = metek_senspathstate(k)
-              licor_diag_out = licor_diag(k)
-              licor_co2_out = licor_co2(k)
-              licor_h2o_out = licor_h2o(k)
-              licor_co2_str_out = licor_co2_str(k) 
-              licor_pr_out = licor_pr(k)
-              licor_t_out = licor_t(k)
               CallTable table3 
           Next k
           
@@ -911,8 +830,15 @@ BeginProg
         
         ' Apogee SI-4H1-SS 3287
         SDI12Recorder(apogee,C3,2,"M1!",1.0,0)
-        apogee_body_T = apogee(1)
-        apogee_targ_T = apogee(2)
+		' switch apogee_body_T with apogee_targ_T,  Dave Costa November 13, 2019
+		'------------orginal------------
+        'apogee_body_T = apogee(1)
+        'apogee_targ_T = apogee(2)
+        '------------current------------		
+        apogee_body_T = apogee(2)
+        apogee_targ_T = apogee(1)
+
+
         call_time_sdi2 = Timer (1,mSec,4) 
         
         ' *********************************************************************
