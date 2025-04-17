@@ -1,4 +1,4 @@
-Public PgmVersion As String = "ASFS50_506"
+Public PgmVersion As String = "ASFS50_600"
 '
 ' Autonomous Surface Flux System (ASFS) - MOSAiC
 ' ASFS 50
@@ -128,8 +128,8 @@ Units sr30_swu_DegC = degC
 Units sr30_swu_IrrC = Wm2
 Units sr30_swu_Irr = Wm2
 Units sr30_swu_fantach = Hz
-Units sr30_swu_heatA = mA 
-Units sr30_swu_tilt = deg  
+Units sr30_swu_heatA = mA  
+Units sr30_swu_tilt = deg 
 
 ' SR30 SWD
 Public sr30_swd_data(5) As Long
@@ -144,8 +144,8 @@ Units sr30_swd_DegC = degC
 Units sr30_swd_IrrC = Wm2
 Units sr30_swd_Irr = Wm2
 Units sr30_swd_fantach = Hz
-Units sr30_swd_heatA = mA  
-Units sr30_swd_tilt = deg   
+Units sr30_swd_heatA = mA   
+Units sr30_swd_tilt = deg
 
 ' Vaisala
 Public vaisala_data(44) As Long
@@ -164,8 +164,11 @@ Units vaisala_Td = degC
 Units vaisala_P = hPa
 
 ' EFOY
-Public efoy_dataINT32(6) As Long
-Public efoy_dataUINT16(6) As Long
+Public efoy_dataINT32tst As Long
+Public efoy_dataINT32int As Long
+Public efoy_dataUINT16bat As Long
+Public efoy_dataUINT16f As Long
+Public efoy_dataUINT16e As Long
 Public efoy_dataINT16 As Long
 Public efoy_result
 Public efoy_Ubat As Float
@@ -173,14 +176,12 @@ Public efoy_FuellSt As Float
 Public efoy_Error As Long
 Public efoy_Tst As Float
 Public efoy_Tint As Float 
-Public efoy_Twt As Float
 Public efoy_Laus As Float
 Units efoy_Ubat = V
 Units efoy_FuellSt = %
 Units efoy_Error = N
 Units efoy_Tst = degC
 Units efoy_Tint = degC
-Units efoy_Twt = degC
 Units efoy_Laus = A
 
 ' SR50
@@ -233,9 +234,7 @@ Units fp_B_mV = mV
 Units fp_B_Wm2 = Wm2
 
 ' Metek
-Public HandleM As Long
-Public metek_tcp_result
-Public metek_socket
+Public metek_422_result
 Public RawStringM As String * 15001
 Public SplitStringsM(101) As String * 150
 Public metekstr As String * 150
@@ -273,7 +272,6 @@ Public licor_t(101)
 ' These varibles will be written to the file, extracted from licor/metek above
 Public metek_heatstatus_out
 Public metek_senspathstate_out
-Public metek_diag_out As String * 5
 Public metek_x_out
 Public metek_y_out 
 Public metek_z_out 
@@ -299,7 +297,7 @@ Units licor_co2_out = mg/m3
 Units licor_h2o_out = g/m3
 Units licor_t_out = degC
 Units licor_pr_out = Pa
-
+ 
 ' GPS 
 Public NMEAStrings(4) As String * 100 = {"$GPRMC","$GPGGA","$HEHDT","GPGZDA"}
 Public GPS_Data(25) As Double
@@ -360,7 +358,7 @@ DataTable (table1,true,-1)
    ' This is used to count the # of 1s scans that are included in the
 	 ' 1m average: should be 60, but less is delays in slow sequence or skipped
    Totalize (1,counts_main,UINT2,False)
-   Maximum (1,call_time_mainscan,UINT2,False,False)
+   Maximum (1,call_time_mainscan,UINT2,False,False)	
    Maximum (1,call_time_modbus_sr301,UINT2,False,False)
    Maximum (1,call_time_modbus_sr302,UINT2,False,False)
    Maximum (1,call_time_modbus_vaisala,UINT2,False,False)
@@ -469,8 +467,7 @@ DataTable (table1,true,-1)
    Average(1,efoy_Ubat,FP2,False)
    Average(1,efoy_Laus,FP2,False)
    Average(1,efoy_Tst,FP2,False)
-   Average(1,efoy_Tint,FP2,False)
-   Average(1,efoy_Twt,FP2,False)  
+   Average(1,efoy_Tint,FP2,False)  
          
 EndTable
 
@@ -507,8 +504,8 @@ DataTable (sumfile,true,36)
     Average (1,metek_x,FP2,False)               '21. X winds sonic (m/s *10, 4 char x 2): -127 >> -12.7 m/s
     Average (1,metek_y,FP2,False)               '22. Y winds sonic (m/s *10, 4 char x 2): -127 >> -12.7 m/s
     Average (1,metek_z,FP2,False)              '23. Z winds sonic  (m/s *100, 4 char x 2): -127 >> -1.27 m/s
-    Sample  (1, metek_heatstatus_out,UINT2,False)       '25: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
-    Sample  (1, metek_senspathstate_out,UINT2,False)    '26: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
+    Sample  (1,metek_heatstatus_out,UINT2,False)       '25: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
+    Sample  (1,metek_senspathstate_out,UINT2,False)    '26: 9 sonic plausibility characters (perhaps other error characters, see manual page 63) (1 char)
     Average (1,sr30_swu_fantach,UINT2,False)            '28: SR30 fantach in Hz
     Average (1,sr30_swu_heatA,UINT2,False)              '29: SR30 fantach in Hz
     Average (1,sr30_swd_fantach,UINT2,False)            '30: SR30 heat amperage in mV 
@@ -533,7 +530,7 @@ DataTable (table3,true,36001)
       Sample(1,metek_x_out,IEEE4)
       Sample(1,metek_y_out,IEEE4)
       Sample(1,metek_z_out,IEEE4)
-      Sample(1,metek_T_out,IEEE4)    
+      Sample(1,metek_T_out,IEEE4)                        
       Sample(1,metek_heatstatus_out,UINT2)                    
       Sample(1,metek_senspathstate_out,UINT2)
       Sample(1,licor_co2_out,IEEE4)
@@ -556,8 +553,8 @@ DataTable(table4,true,-1)
       Sample (1,gps_lat_min,IEEE8) 
       Sample (1,gps_lon_deg,FP2)                    
       Sample (1,gps_lon_min,IEEE8)                
-      Sample (1,gps_hdg,IEEE4)                  
-      Sample (1,gps_alt,IEEE4)  
+      Sample (1,gps_hdg,IEEE4)                   
+      Sample (1,gps_alt,IEEE4)
       Sample (1,gps_hdop,FP2)  
       Sample (1,gps_nsat,UINT2)               
       Sample (1,call_time_modbus_vaisala,UINT2)
@@ -573,7 +570,7 @@ EndTable
 ' false to true.
 ConstTable (restarts)
 
-    Const restartstable = -1
+    Const restartstable = -1 
 
 EndConstTable
 
@@ -585,9 +582,10 @@ EndConstTable
 
 BeginProg
 
-    ' TCPOpen opens the ethernet port for reading, IP = sonic's IP, handle is the port handle             
-    metek_socket = TCPOpen (metekIP,metekPort,15001,100,HandleM,1) ' METEK: network
-    licor_socket = TCPOpen (licorIP,licorPort,9001,100,HandleL,1)  ' LICOR: network
+    ' TCPOpen opens the ethernet port for reading, IP = sonic's IP, handle is the port handle 
+    ' Field change, 2019 Oct 7: Sonic thru serial             
+    licor_socket = TCPOpen (licorIP,licorPort,6001,100,HandleL,1)  ' LICOR: network
+    SerialOpen (ComME,57600,0,0,12001)
     
     ' Be and NTP server
     ntp_server = NetworkTimeProtocol("", -1, 0)  
@@ -606,17 +604,17 @@ BeginProg
         SerialOpen (ComC7,19200,0,0,100,0)
         
         ' Iridium Link
-        SerialOpen(ComRS232,19200,0,0,2000)              
+        SerialOpen(ComRS232,19200,0,0,2000)     
         
-        ' This is a continuous storage of metek and licor data in a ring buffer of size = lasst argument in bytes   
-        metek_tcp_result = SerialInBlock (HandleM,RawStringM,12001)
+        ' This is a continuous storage of metek and licor data in a ring buffer of size = last argument in bytes   
+        metek_422_result = SerialInBlock (ComME,RawStringM,12001)
         licor_tcp_result = SerialInBlock (HandleL,RawStringL,5001)
         
         ' If for some reason the metek or licor reboot the network line is interupted, we need to restart the
         ' the connection or else the logger won't receive the data anymore
-        If metek_tcp_result = 0 Then
-          TCPClose (metek_socket)
-          metek_socket = TCPOpen (metekIP,metekPort,15001,100,HandleM,1) 
+        If licor_socket = 0 OR licor_tcp_result = 0 Then
+          TCPClose (licor_socket)
+          licor_socket = TCPOpen (licorIP,licorPort,15001,100,HandleL,1)
         EndIf
         
         ' ***********************************************************************
@@ -682,11 +680,11 @@ BeginProg
           EndIf
           
           If IfTime (irid_offset+4,sumfile_freq,Min) Then 
-              ' Send the last 36 10 min avg summary data (past 6 hours)
+             ' Send the last 36 10 min avg summary data (past 6 hours)
              'SendData (ComRS232,0,4094,sumfile,36)
              SendVariables(callback_result, ComRS232,4094, 4094, 0000, 2500,"Public","Callback",dummy,1)
-          EndIf
-          
+          EndIf              
+
         EndIf
         ' *********************************************************************
 
@@ -703,7 +701,7 @@ BeginProg
         gps_lat_min = GPS_Data(2)
         gps_lon_deg = GPS_Data(3)
         gps_lon_min = GPS_Data(4)
-        gps_alt  = GPS_Data(10) 
+        gps_alt  = GPS_Data(10)
         gps_hdg  = GPS_Data(18)  
         gps_qc   = GPS_Data(8)  
         gps_nsat = GPS_Data(9)
@@ -760,7 +758,7 @@ BeginProg
               If metekstr <> CHR(0) Then ' if the message is not empty
                 SplitStr (SplitStringsM2(),metekstr,CHR(44),12,5)' parse into 12 pieces using comma delimiter
                 metek_heatstatus(k) = Mid (SplitStringsM2(1),1,1) 
-                metek_senspathstate(k) = Mid (SplitStringsM2(1),2,1)  
+                metek_senspathstate(k) = Mid (SplitStringsM2(1),2,1) 
                 metek_x(k) = SplitStringsM2(2)
                 metek_y(k) = SplitStringsM2(3)
                 metek_z(k) = SplitStringsM2(4)
@@ -848,8 +846,8 @@ BeginProg
         ' *********************************************************************
 
 
-        ' ***************************** MODBUS ********************************  
-        
+        ' ***************************** MODBUS ********************************
+          
         ' ComC5 (C5/C6) is the RS485 port - the reads toggle between 9600 and 19200   
         SerialOpen (ComC5,19200,2,0,100,4)  
         
@@ -881,7 +879,7 @@ BeginProg
         sr30_swd_fantach = sr30_swd_data(3) / 60 'Hz        
         ModbusMaster (sr30_swd_val,ComC5,19200,2,3,sr30_swd_data,199,1,1,15,3)
         sr30_swd_heatA   = sr30_swd_data(1) 'mA   
-        call_time_modbus_sr302 = Timer (1,mSec,4) 
+        call_time_modbus_sr302 = Timer (1,mSec,4)  
         
         ' Vaisala
         ' There are two separate calls because we do not have access to mid-range register
@@ -895,23 +893,24 @@ BeginProg
         vaisala_P_Long = vaisala_data(44)*2^16 + vaisala_data(43)   
         MoveBytes (vaisala_P,0,vaisala_P_Long,0,4)     
         call_time_modbus_vaisala = Timer (1,mSec,4) 
-        SerialClose (ComC5)
-        
-        SerialOpen (ComC5,9600,2,0,100,4) 
-        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT32,30002,5,2,15,2)
-        efoy_Tst = efoy_dataINT32(1) * 0.001
-        efoy_Tint = efoy_dataINT32(3) * 0.001
-        efoy_Twt = efoy_dataINT32(5) * 0.001
-        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16,30016,1,2,15,3)
-        efoy_Ubat = efoy_dataUINT16(1) * 0.001
+        SerialClose (ComC5)           
+
+        SerialOpen (ComC5,9600,2,0,100,4)
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT32tst,30002,1,2,15,2)
+        efoy_Tst = efoy_dataINT32tst * 0.001
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT32int,30004,1,2,15,2)
+        efoy_Tint = efoy_dataINT32int * 0.001
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16bat,30016,1,2,15,3)
+        efoy_Ubat = efoy_dataUINT16bat * 0.001
         ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataINT16,30029,1,2,15,1)
         efoy_Laus = efoy_dataINT16 * 0.001  
-        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16,30036,3,2,15,3)
-        efoy_FuellSt = efoy_dataUINT16(1) * 0.01
-        efoy_Error = efoy_dataUINT16(3)
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16f,30036,1,2,15,3)
+        efoy_FuellSt = efoy_dataUINT16f * 0.01
+        ModbusMaster (efoy_result,ComC5,9600,4,3,efoy_dataUINT16e,30038,1,2,15,3)
+        efoy_Error = efoy_dataUINT16e
         call_time_efoy = Timer (1,mSec,4) 
         SerialClose (ComC5)
-             
+        
         ' *********************************************************************  
       
 
@@ -939,7 +938,7 @@ BeginProg
         CallTable table4
         
   NextScan
-   
+      
 EndProg
 
 ' =============================================================================
