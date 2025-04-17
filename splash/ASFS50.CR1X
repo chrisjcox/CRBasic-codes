@@ -1,4 +1,4 @@
-Public PgmVersion As String = "ASFS50_SPLASH_802"
+Public PgmVersion As String = "ASFS50_SPLASH_803"
 
 ' Autonomous Surface Flux System (ASFS) - MOSAiC
 ' ASFS 50
@@ -38,7 +38,8 @@ Public PgmVersion As String = "ASFS50_SPLASH_802"
 '     Apogee     SI-4H1-SS    3284        sfc IR T    SDI-12 #2 C3
 '     Metek      uSonic-3     0111067257  3d winds    Network       192.168.202.54:7200 & ComME
 '     Licor      7500-DS                  h2o/co2     Network       192.168.202.55:5001
-'     Hukseflux  HFP01SC-10   5693        flux, c     D5
+'     Hukseflux  HFP01SC-10   5636        flux, c     D
+'     Hukseflux  HFP01SC-10   5637        flux, c     D
 '     Hemisphere v102         *01-189     GPS         RS232 C7/C8   38400,N,1,8
 '     Campbell   SoilVUE10    2107        soil        SDI-12 #1 C3  
 
@@ -61,19 +62,17 @@ Const shipradioIP          = "192.168.202.6"     ' IP for the base station (ship
 Const asfsradioIP          = "192.168.202.53"    ' IP for this asfs station radio
 Const base_no              = "xxxxxxxxxxxxxx"    ' base station number for the spare iridium modem pair used in container beginning in may 2020
 Const scan_freq    As Long = 5  ' [sec]          ' the scan cycle
-Const sumfile_avg  As Long = 10 ' [min]          ' Summary file averaging period: 10 = 10 min averages
-Const sumfile_freq As Long = 60 ' [min]          ' How often do you want to send summary files if on iridium?
-Const engfile_avg  As Long = 1440 ' [min]          ' Summary file averaging period: 10 = 10 min averages
-Const engfile_freq As Long = 1440 ' [min]          ' How often do you want to send summary files if on iridium?
+Const sumfile_avg  As Long = 180 ' [min]          ' Summary file averaging period: 10 = 10 min averages
+Const sumfile_freq As Long = 1440 ' [min]          ' How often do you want to send summary files if on iridium?
 Const crdfile_freq As Long = 30 ' [min]          ' Frequency of new files containing 20 Hz data 
 Const crdsoil_freq As Long = 1  ' [day]          ' How often to write soil data to card
 Const datafile_avg As Long = 60 ' [sec]          ' Data file averaging time: 60 = 1 min averages
 Const soilfile_avg As Long = 60 ' [min]          ' Data file averaging time: 60 = 60 min averages
-Const irid_offset  As Long = 27                   ' The value is unique for each ASFS. Iridium data will be sent at staggered intervals between the stations
+Const irid_offset  As Long = 0                   ' The value is unique for each ASFS. Iridium data will be sent at staggered intervals between the stations
 
 ' Set Cals
-Const fp_A_s = 61.26/1000 ' 5693 Sensitivity [mV/(W/m2)]
-Const fp_B_s = 0 ' Sensitivity [mV/(W/m2)]
+Const fp_A_s = 60.00/1000 ' 5636 Sensitivity [mV/(W/m2)]
+Const fp_B_s = 63.91/1000 ' 5637 Sensitivity [mV/(W/m2)]
 Const ir20_lwd_s = 12.02/1000 ' 4060 Sensitivity [mV/(W/m2)] 
 Const ir20_lwd_acoef = -16.32e-6
 Const ir20_lwd_bcoef = 2.54e-3
@@ -550,25 +549,14 @@ DataTable (sum_table,true,36)
     Average (1,fp_A_Wm2,FP2,False)                 
     Average (1,fp_B_Wm2,FP2,False)                        
     Average (1,metek_x(),FP2,False)                                 
-    Average (1,metek_y(),FP2,False)                    
+    Average (1,metek_y(),FP2,False)    
+    Average (1,sr30_swu_fantach,UINT2,False)                       
+    Average (1,sr30_swd_fantach,UINT2,False)                    
+    Average (1,sr30_swu_tilt,FP2,False)         
+    Average (1,sr30_swd_tilt,FP2,False)  
+    Average (1,efoy_Ubat,FP2,False)                 
         
 EndTable  
-
-DataTable (eng_table,true,36)
- 
-   DataInterval (0,engfile_avg,Min,10)
-   
-    Sample  (1,metek_senspathstate_out,UINT2,False)   
-    Average (1,sr30_swu_fantach,UINT2,False)           
-    Average (1,sr30_swu_heatA,UINT2,False)              
-    Average (1,sr30_swd_fantach,UINT2,False)           
-    Average (1,sr30_swd_heatA,UINT2,False)          
-    Average (1,sr30_swu_tilt,FP2,False)         
-    Average (1,sr30_swd_tilt,FP2,False) 
-    Average (1,metek_InclX,FP2,False)                            
-    Average (1,metek_InclY,FP2,False) 
-    
-EndTable
     
 ' fast data
 ' Saved to SD-card at in crdfile_freq (nominally 1-hr) blocks
