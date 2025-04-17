@@ -1,4 +1,4 @@
-Public PgmVersion As String = "ASFS50_SPLASH_806"
+Public PgmVersion As String = "ASFS50_SPLASH_807"
 
 ' Autonomous Surface Flux System (ASFS) - MOSAiC
 ' ASFS 50
@@ -25,6 +25,7 @@ Public PgmVersion As String = "ASFS50_SPLASH_806"
 '   9/29/2021 : splash deploy. reducing iridium load
 '   12/23/21: 2nd sum table for 10 min means of met data
 '   1/18/22: sum table to 30 min
+'   9/13/22: 10 min sum removed, 15 min soil
 '
 ' -----------------------------------------------------------------------------
 '     Manuf.     Model        SN          Function    Ch             Note
@@ -71,7 +72,7 @@ Const sumfile_freq As Long = 1440 ' [min]          ' How often do you want to se
 Const crdfile_freq As Long = 30 ' [min]          ' Frequency of new files containing 20 Hz data 
 Const crdsoil_freq As Long = 1  ' [day]          ' How often to write soil data to card
 Const datafile_avg As Long = 60 ' [sec]          ' Data file averaging time: 60 = 1 min averages
-Const soilfile_avg As Long = 60 ' [min]          ' Data file averaging time: 60 = 60 min averages
+Const soilfile_avg As Long = 15 ' [min]          ' Data file averaging time: 60 = 60 min averages
 Const irid_offset  As Long = 30                  ' The value is unique for each ASFS. Iridium data will be sent at staggered intervals between the stations
 
 ' Set Cals
@@ -564,18 +565,18 @@ DataTable (sum_table,true,36)
 EndTable  
 
 ' summary file number 2 (10 min averages)
-DataTable (sum_table2,true,300)
- 
-   DataInterval (0,sumfile2_avg,Min,10)
-                                                                                                     
-    Average (1,vaisala_P,FP2,False)              
-    Average (1,vaisala_T,FP2,False)              
-    Average (1,vaisala_RH,FP2,False)                   
-    Average (1,sr50_dist,FP2,False)                                      
-    Average (1,metek_x(),FP2,False)                                 
-    Average (1,metek_y(),FP2,False)    
-                
-EndTable
+'DataTable (sum_table2,true,300)
+' 
+'   DataInterval (0,sumfile2_avg,Min,10)
+'                                                                                                     
+'    Average (1,vaisala_P,FP2,False)              
+'    Average (1,vaisala_T,FP2,False)              
+'    Average (1,vaisala_RH,FP2,False)                   
+'    Average (1,sr50_dist,FP2,False)                                      
+'    Average (1,metek_x(),FP2,False)                                 
+'    Average (1,metek_y(),FP2,False)    
+'                
+'EndTable
     
 ' fast data
 ' Saved to SD-card at in crdfile_freq (nominally 1-hr) blocks
@@ -998,7 +999,7 @@ BeginProg
         CallTable slow_table
         CallTable met_table
         CallTable sum_table  
-        CallTable sum_table2
+        'CallTable sum_table2
         
         ' rename the files on the sd card to include a time stamp
         ' creating a table to store a time is the only way I know of to 
