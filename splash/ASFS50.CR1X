@@ -1,4 +1,4 @@
-Public PgmVersion As String = "ASFS50_SPLASH_804"
+Public PgmVersion As String = "ASFS50_SPLASH_805"
 
 ' Autonomous Surface Flux System (ASFS) - MOSAiC
 ' ASFS 50
@@ -23,6 +23,7 @@ Public PgmVersion As String = "ASFS50_SPLASH_804"
 '   4/6/2020 - changed the flux plate cal because the new flux plate is a spare (5693)
 '   5/31/2020 : for leg 4, FPB ready, with licor, changed the base station number...
 '   9/29/2021 : splash deploy. reducing iridium load
+'   12/23/21: 2nd sum table for 10 min means of met data
 '
 ' -----------------------------------------------------------------------------
 '     Manuf.     Model        SN          Function    Ch             Note
@@ -53,6 +54,7 @@ PipeLineMode
 Const stname               = "ASFS_50"           ' ASFS Station name
 Const slow_table           = "slow"              ' "1 min" avg data filename
 Const sum_table            = "sumfile"           ' "summary" (i.e, 6 hr of 10 min avg) filename
+Const sum_table2           = "sumfile2"           ' "summary" (i.e, 6 hr of 10 min avg) filename
 Const fast_table           = "fast"              ' "fast" (i.e., 20 Hz) filename
 Const met_table            = "met"               ' 5s vaisala data
 Const soil_table           = "soil"              ' soil data
@@ -63,6 +65,7 @@ Const asfsradioIP          = "192.168.202.53"    ' IP for this asfs station radi
 Const base_no              = "xxxxxxxxxxxxxx"    ' base station number for the spare iridium modem pair used in container beginning in may 2020
 Const scan_freq    As Long = 5  ' [sec]          ' the scan cycle
 Const sumfile_avg  As Long = 180 ' [min]          ' Summary file averaging period: 10 = 10 min averages
+Const sumfile2_avg  As Long = 10 ' [min]          ' Summary file averaging period: 10 = 10 min averages
 Const sumfile_freq As Long = 1440 ' [min]          ' How often do you want to send summary files if on iridium?
 Const crdfile_freq As Long = 30 ' [min]          ' Frequency of new files containing 20 Hz data 
 Const crdsoil_freq As Long = 1  ' [day]          ' How often to write soil data to card
@@ -558,6 +561,20 @@ DataTable (sum_table,true,36)
     Average (1,efoy_Laus,FP2,False)
             
 EndTable  
+
+' summary file number 2 (10 min averages)
+DataTable (sum_table2,true,300)
+ 
+   DataInterval (0,sumfile2_avg,Min,10)
+                                                                                                     
+    Average (1,vaisala_P,FP2,False)              
+    Average (1,vaisala_T,FP2,False)              
+    Average (1,vaisala_RH,FP2,False)                   
+    Average (1,sr50_dist,FP2,False)                                      
+    Average (1,metek_x(),FP2,False)                                 
+    Average (1,metek_y(),FP2,False)    
+                
+EndTable
     
 ' fast data
 ' Saved to SD-card at in crdfile_freq (nominally 1-hr) blocks
@@ -980,7 +997,8 @@ BeginProg
         CallTable slow_table
         CallTable met_table
         CallTable sum_table  
-
+        CallTable sum_table2
+        
         ' rename the files on the sd card to include a time stamp
         ' creating a table to store a time is the only way I know of to 
         ' modify a time (e.g., -crdfile_freq) and reformat into desired str
